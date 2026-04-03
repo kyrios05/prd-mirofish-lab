@@ -1,2 +1,2 @@
 # prd-mirofish-lab
-Generate PRDs through conversation and validate them with MiroFish simulations.
+PRD-MiroFish-Lab is a chat-driven PRD generation and validation system that converts product conversations into structured PRDs and validates them through MiroFish-based simulation workflows.
