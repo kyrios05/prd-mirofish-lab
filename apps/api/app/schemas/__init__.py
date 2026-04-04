@@ -3,9 +3,10 @@ schemas/__init__.py — Public re-export of all PRD domain models.
 
 Import pattern for consumers:
     from app.schemas import PRDDocument, Persona, Risk, Language, ...
+    from app.schemas import SimulationSpec, ValidationConfig
 
 Dependency order (no cycles):
-    enums → common → prd → __init__
+    enums → common → prd → simulation → __init__
 """
 
 # Enums
@@ -53,6 +54,12 @@ from .prd import (
     ValidationSection,
 )
 
+# Simulation spec models (T05)
+from .simulation import (
+    SimulationSpec,
+    ValidationConfig,
+)
+
 __all__ = [
     # --- Enums ---
     "FeaturePriority",
@@ -91,4 +98,7 @@ __all__ = [
     "ValidationSection",
     # --- Root model ---
     "PRDDocument",
+    # --- Simulation spec models (T05) ---
+    "SimulationSpec",
+    "ValidationConfig",
 ]
