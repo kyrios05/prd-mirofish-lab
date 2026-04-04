@@ -523,8 +523,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "prd_markdown": { "type": "string" },
-        "simulation_spec_markdown": { "type": "string" },
+        "prd_markdown": { "type": ["string", "null"] },
+        "simulation_spec_markdown": { "type": ["string", "null"] },
         "validation_result": { "$ref": "#/$defs/ValidationResult" }
       }
     }
