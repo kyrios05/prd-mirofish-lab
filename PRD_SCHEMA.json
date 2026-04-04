@@ -1,0 +1,523 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prd-mirofish-lab/schemas/prd/0.1.0",
+  "title": "PRDDocument",
+  "description": "Structured PRD document — source of truth for all backend models and downstream integrations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "metadata",
+    "product",
+    "users",
+    "problem",
+    "solution",
+    "scope",
+    "requirements",
+    "success_metrics",
+    "delivery",
+    "assumptions",
+    "risks",
+    "open_questions",
+    "validation"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0",
+      "description": "Locked schema version. Increment only with explicit migration plan."
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "product": {
+      "$ref": "#/$defs/Product"
+    },
+    "users": {
+      "$ref": "#/$defs/Users"
+    },
+    "problem": {
+      "$ref": "#/$defs/Problem"
+    },
+    "solution": {
+      "$ref": "#/$defs/Solution"
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope"
+    },
+    "requirements": {
+      "$ref": "#/$defs/Requirements"
+    },
+    "success_metrics": {
+      "$ref": "#/$defs/SuccessMetrics"
+    },
+    "delivery": {
+      "$ref": "#/$defs/Delivery"
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/TaggedItem" },
+      "minItems": 1
+    },
+    "risks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Risk" },
+      "minItems": 1
+    },
+    "open_questions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/TaggedItem" },
+      "minItems": 1
+    },
+    "validation": {
+      "$ref": "#/$defs/ValidationSection"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/Artifacts"
+    }
+  },
+  "$defs": {
+    "Language": {
+      "type": "string",
+      "enum": ["ko-KR", "en-US"]
+    },
+    "PrdStatus": {
+      "type": "string",
+      "enum": [
+        "discovery",
+        "drafting",
+        "ready_for_validation",
+        "validated",
+        "revising",
+        "approved"
+      ]
+    },
+    "SourceMode": {
+      "type": "string",
+      "enum": ["chat", "form", "import"]
+    },
+    "Platform": {
+      "type": "string",
+      "enum": [
+        "web",
+        "mobile",
+        "desktop",
+        "api",
+        "internal_tool",
+        "agent",
+        "other"
+      ]
+    },
+    "ProductStage": {
+      "type": "string",
+      "enum": ["idea", "mvp", "beta", "growth", "enterprise", "unknown"]
+    },
+    "Priority": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "Severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "TimelineConfidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "IntegrationType": {
+      "type": "string",
+      "enum": [
+        "api",
+        "webhook",
+        "sdk",
+        "database",
+        "auth",
+        "payment",
+        "notification",
+        "storage",
+        "analytics",
+        "other"
+      ]
+    },
+    "FeaturePriority": {
+      "type": "string",
+      "enum": ["must_have", "should_have", "nice_to_have", "out_of_scope"]
+    },
+    "ValidationTemplate": {
+      "type": "string",
+      "enum": [
+        "stakeholder_risk_review",
+        "mvp_scope_review",
+        "security_compliance_review",
+        "user_adoption_review",
+        "operational_readiness_review"
+      ]
+    },
+    "Source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "$ref": "#/$defs/SourceMode" },
+        "chat_turn_count": { "type": "integer", "minimum": 0 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      }
+    },
+    "Metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "created_at",
+        "updated_at",
+        "language",
+        "status",
+        "source"
+      ],
+      "properties": {
+        "project_id": { "type": "string", "minLength": 1 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "language": { "$ref": "#/$defs/Language" },
+        "status": { "$ref": "#/$defs/PrdStatus" },
+        "source": { "$ref": "#/$defs/Source" },
+        "owner": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "Product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "one_liner", "category", "platforms", "stage"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "one_liner": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "platforms": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Platform" },
+          "minItems": 1
+        },
+        "stage": { "$ref": "#/$defs/ProductStage" },
+        "industry_context": { "type": "string" },
+        "domain_context": { "type": "string" }
+      }
+    },
+    "Persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "role", "goals", "pain_points"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "goals": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "pain_points": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "company_type": { "type": "string" },
+        "context": { "type": "string" }
+      }
+    },
+    "Users": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary_personas"],
+      "properties": {
+        "primary_personas": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Persona" },
+          "minItems": 1
+        },
+        "secondary_personas": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Persona" }
+        },
+        "non_targets": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "Problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core_problem", "pain_points", "current_alternatives"],
+      "properties": {
+        "core_problem": { "type": "string", "minLength": 1 },
+        "pain_points": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "current_alternatives": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "why_now": { "type": "string" },
+        "jobs_to_be_done": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "Feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "priority"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "priority": { "$ref": "#/$defs/FeaturePriority" },
+        "rationale": { "type": "string" }
+      }
+    },
+    "Solution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "value_proposition", "key_features"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "value_proposition": { "type": "string", "minLength": 1 },
+        "key_features": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Feature" },
+          "minItems": 1
+        },
+        "user_journey": { "type": "string" }
+      }
+    },
+    "Scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mvp_in_scope", "out_of_scope"],
+      "properties": {
+        "mvp_in_scope": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "out_of_scope": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "future_expansion": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "launch_constraints": { "type": "string" }
+      }
+    },
+    "Requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "statement": { "type": "string", "minLength": 1 },
+        "priority": { "$ref": "#/$defs/Priority" },
+        "notes": { "type": "string" }
+      }
+    },
+    "Integration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "$ref": "#/$defs/IntegrationType" },
+        "purpose": { "type": "string" }
+      }
+    },
+    "Requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["functional", "non_functional"],
+      "properties": {
+        "functional": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Requirement" },
+          "minItems": 1
+        },
+        "non_functional": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Requirement" },
+          "minItems": 1
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "integrations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Integration" }
+        }
+      }
+    },
+    "Metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "target"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "timeframe": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "SuccessMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["north_star", "product_metrics"],
+      "properties": {
+        "north_star": { "type": "string", "minLength": 1 },
+        "product_metrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Metric" },
+          "minItems": 1
+        },
+        "guardrail_metrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Metric" }
+        }
+      }
+    },
+    "Delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["priority", "timeline_confidence"],
+      "properties": {
+        "priority": { "$ref": "#/$defs/Priority" },
+        "timeline_confidence": { "$ref": "#/$defs/TimelineConfidence" },
+        "target_release": { "type": "string" },
+        "dependencies": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "team_assumptions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "TaggedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "severity": { "$ref": "#/$defs/Severity" }
+      }
+    },
+    "Risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "description", "severity"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "severity": { "$ref": "#/$defs/Severity" },
+        "mitigation": { "type": "string" },
+        "owner": { "type": "string" }
+      }
+    },
+    "Stakeholder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "role", "review_angle"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "review_angle": { "type": "string", "minLength": 1 },
+        "likely_objections": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ValidationSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goals", "stakeholder_personas", "simulation_requirement"],
+      "properties": {
+        "goals": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "stakeholder_personas": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Stakeholder" },
+          "minItems": 1
+        },
+        "simulation_requirement": { "type": "string", "minLength": 1 },
+        "validation_templates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ValidationTemplate" }
+        },
+        "must_answer_questions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ValidationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "top_risks",
+        "missing_requirements",
+        "stakeholder_objections",
+        "scope_adjustments",
+        "recommended_questions",
+        "rewrite_suggestions"
+      ],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "top_risks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "missing_requirements": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stakeholder_objections": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "scope_adjustments": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "recommended_questions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rewrite_suggestions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "Artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prd_markdown": { "type": "string" },
+        "simulation_spec_markdown": { "type": "string" },
+        "validation_result": { "$ref": "#/$defs/ValidationResult" }
+      }
+    }
+  }
+}
