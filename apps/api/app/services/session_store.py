@@ -4,9 +4,13 @@ services/session_store.py — In-memory session state store.
 Stores conversation history and the current PRD draft for each chat session.
 The store is a module-level singleton (plain dict) — no persistence.
 
+T09 additions (backward-compatible)
+------------------------------------
+- SessionState gains: current_phase, checkpoints, phase_history
+- Checkpoint and PhaseTransition are imported from conversation_state
+
 Scope guard
 -----------
-- State machine / checkpointing: T09
 - Persistence (Redis/DB): separate infra ticket
 - LLM history compression: separate ticket
 """
@@ -17,6 +21,15 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+
+# T09: import Checkpoint / PhaseTransition for the extended SessionState.
+# Imported here (not at module top) to avoid circular deps — conversation_state
+# does not import session_store.
+from app.services.conversation_state import (  # noqa: E402
+    Checkpoint,
+    ConversationPhase,
+    PhaseTransition,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +71,16 @@ class SessionState:
     conversation_history: list[ConversationTurn] = field(default_factory=list)
     current_prd_draft: dict[str, Any] | None = None
 
+    # ── T09 additions (backward-compatible — all have defaults) ──────────────
+    current_phase: str = field(default=ConversationPhase.GREETING.value)
+    """Current conversation phase as a string (ConversationPhase.value)."""
+
+    checkpoints: list[Checkpoint] = field(default_factory=list)
+    """Ordered list of saved checkpoints (oldest first)."""
+
+    phase_history: list[PhaseTransition] = field(default_factory=list)
+    """Ordered list of phase transition events (oldest first)."""
+
     @property
     def project_id(self) -> str:
         return f"proj-{self.session_id[:8]}"
@@ -95,7 +118,8 @@ class SessionStore:
     FastAPI runs on asyncio (single-threaded event loop), so no explicit
     locking is needed for the in-memory dict.
 
-    NOTE(T09): Replace with a proper state machine and persistent backend.
+    NOTE(T09): State machine and checkpointing added in T09.
+    Persistent backend: separate infra ticket.
     """
 
     def __init__(self) -> None:
