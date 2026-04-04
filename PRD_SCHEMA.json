@@ -200,7 +200,10 @@
           "minItems": 1
         },
         "stage": { "$ref": "#/$defs/ProductStage" },
-        "industry_context": { "type": "string" },
+        "industry_context": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "domain_context": { "type": "string" }
       }
     },
@@ -291,7 +294,10 @@
           "items": { "$ref": "#/$defs/Feature" },
           "minItems": 1
         },
-        "user_journey": { "type": "string" }
+        "user_journey": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     },
     "Scope": {
@@ -313,7 +319,10 @@
           "type": "array",
           "items": { "type": "string" }
         },
-        "launch_constraints": { "type": "string" }
+        "launch_constraints": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     },
     "Requirement": {

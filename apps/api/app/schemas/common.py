@@ -189,6 +189,15 @@ class ValidationResult(BaseModel):
     Maps to PRD_SCHEMA.json $defs/ValidationResult.
     NOTE: This model is read-only from the PRD author's perspective.
           Populated by the validation packager (T05 scope).
+
+    SCHEMA DRIFT NOTE (tracked in T02):
+        PRD_SCHEMA.json marks top_risks, missing_requirements,
+        stakeholder_objections, scope_adjustments, recommended_questions,
+        and rewrite_suggestions as JSON Schema "required" — meaning they
+        MUST be present in the payload (though they may be empty arrays).
+        This Pydantic model uses default_factory=list so callers can omit
+        these fields during construction; the T02 validator should enforce
+        the JSON Schema "required" constraint at the boundary level.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -110,11 +110,11 @@ class Product(BaseModel):
         ..., min_length=1, description="Target delivery platforms"
     )
     stage: ProductStage = Field(..., description="Current product maturity stage")
-    industry_context: Optional[str] = Field(
-        None, description="Industry or vertical context"
+    industry_context: Optional[list[str]] = Field(
+        None, description="Industry or vertical context tags (e.g. ['B2B SaaS', 'Fintech'])"
     )
     domain_context: Optional[str] = Field(
-        None, description="Technical or functional domain context"
+        None, description="Technical or functional domain context (free-text)"
     )
 
 
@@ -185,8 +185,8 @@ class Solution(BaseModel):
     key_features: list[Feature] = Field(
         ..., min_length=1, description="Key product features with MoSCoW priority"
     )
-    user_journey: Optional[str] = Field(
-        None, description="Narrative user journey through the solution"
+    user_journey: Optional[list[str]] = Field(
+        None, description="Ordered steps of the user journey through the solution"
     )
 
 
@@ -209,7 +209,7 @@ class Scope(BaseModel):
     future_expansion: Optional[list[str]] = Field(
         None, description="Items planned for post-MVP phases"
     )
-    launch_constraints: Optional[str] = Field(
+    launch_constraints: Optional[list[str]] = Field(
         None, description="Hard constraints on launch (regulatory, technical, budget)"
     )
 

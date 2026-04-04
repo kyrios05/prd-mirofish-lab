@@ -22,7 +22,7 @@
     "category": "AI Developer Tool",
     "platforms": ["web", "api"],
     "stage": "mvp",
-    "industry_context": "B2B SaaS — 제품 기획 및 개발 도구 시장",
+    "industry_context": ["B2B SaaS", "제품 기획 및 개발 도구 시장"],
     "domain_context": "LLM 기반 문서 생성 + 시뮬레이션 검증 파이프라인"
   },
   "users": {
@@ -122,7 +122,14 @@
         "rationale": "감사 목적 및 되돌리기 기능. MVP에서는 없어도 핵심 워크플로우 가능."
       }
     ],
-    "user_journey": "1. PM이 제품 아이디어를 채팅으로 입력 → 2. 시스템이 PRD 섹션을 순서대로 질문/채움 → 3. 완성된 PRD를 Markdown으로 확인 → 4. MiroFish 검증 트리거 → 5. 검증 결과 기반으로 PRD 수정 → 6. 최종 PRD를 팀과 공유"
+    "user_journey": [
+      "1. PM이 제품 아이디어를 채팅으로 입력",
+      "2. 시스템이 PRD 섹션을 순서대로 질문/채움",
+      "3. 완성된 PRD를 Markdown으로 확인",
+      "4. MiroFish 검증 트리거",
+      "5. 검증 결과 기반으로 PRD 수정",
+      "6. 최종 PRD를 팀과 공유"
+    ]
   },
   "scope": {
     "mvp_in_scope": [
@@ -148,7 +155,7 @@
       "커스텀 검증 페르소나 편집기 (V3)",
       "다국어 PRD 동시 생성 (V3)"
     ],
-    "launch_constraints": "MiroFish API 연동 계약 완료 전까지 검증 기능은 Mock 모드로 제공"
+    "launch_constraints": ["MiroFish API 연동 계약 완료 전까지 검증 기능은 Mock 모드로 제공"]
   },
   "requirements": {
     "functional": [
