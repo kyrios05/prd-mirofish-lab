@@ -1,0 +1,155 @@
+/* ============================================================
+   globals.css — T08 global styles, CSS variables, dark mode
+   ============================================================ */
+
+/* ── CSS Variables (Light theme) ──────────────────────────── */
+:root {
+  /* Layout */
+  --header-height: 56px;
+  --footer-height: 52px;
+  --panel-gap: 0px;
+
+  /* Colors — neutral */
+  --bg-app: #f0f2f5;
+  --bg-panel: #ffffff;
+  --bg-panel-header: #f8fafc;
+  --border: #e2e8f0;
+  --border-focus: #3b82f6;
+
+  /* Text */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-inverse: #ffffff;
+
+  /* Phase badge colors */
+  --phase-greeting: #3b82f6;
+  --phase-interviewing: #f59e0b;
+  --phase-reviewing: #8b5cf6;
+  --phase-ready: #10b981;
+  --phase-validated: #d97706;
+
+  /* Status colors */
+  --status-empty: #94a3b8;
+  --status-incomplete: #f59e0b;
+  --status-ready: #10b981;
+
+  /* Semantic */
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --color-success: #10b981;
+  --color-info: #3b82f6;
+
+  /* Chat bubbles */
+  --bubble-user-bg: #3b82f6;
+  --bubble-user-text: #ffffff;
+  --bubble-assistant-bg: #f1f5f9;
+  --bubble-assistant-text: #1e293b;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.10);
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  /* Typography */
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+/* ── Dark theme ───────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-app: #0f172a;
+    --bg-panel: #1e293b;
+    --bg-panel-header: #1a2744;
+    --border: #334155;
+    --border-focus: #60a5fa;
+
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    --bubble-user-bg: #2563eb;
+    --bubble-user-text: #f8fafc;
+    --bubble-assistant-bg: #334155;
+    --bubble-assistant-text: #e2e8f0;
+  }
+}
+
+/* ── Reset ────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Utility ──────────────────────────────────────────────── */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); border: 0;
+}
+
+/* ── Markdown prose (inside PRDPreview) ───────────────────── */
+.markdown-prose {
+  color: var(--text-primary);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.markdown-prose h1 { font-size: 1.4rem; font-weight: 700; margin: 1.2rem 0 0.5rem; color: var(--text-primary); }
+.markdown-prose h2 { font-size: 1.15rem; font-weight: 600; margin: 1rem 0 0.4rem; color: var(--text-primary); border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+.markdown-prose h3 { font-size: 1rem; font-weight: 600; margin: 0.8rem 0 0.3rem; }
+.markdown-prose p { margin: 0.4rem 0; }
+.markdown-prose ul, .markdown-prose ol { padding-left: 1.4rem; margin: 0.4rem 0; }
+.markdown-prose li { margin: 0.2rem 0; }
+.markdown-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-panel-header);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.markdown-prose pre {
+  background: var(--bg-panel-header);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.markdown-prose pre code { background: none; border: none; padding: 0; }
+.markdown-prose strong { font-weight: 600; }
+.markdown-prose blockquote {
+  border-left: 3px solid var(--border-focus);
+  padding-left: 0.75rem;
+  color: var(--text-secondary);
+  margin: 0.5rem 0;
+}
+.markdown-prose table { width: 100%; border-collapse: collapse; font-size: 0.9em; margin: 0.5rem 0; }
+.markdown-prose th, .markdown-prose td { padding: 0.35rem 0.6rem; border: 1px solid var(--border); text-align: left; }
+.markdown-prose th { background: var(--bg-panel-header); font-weight: 600; }
