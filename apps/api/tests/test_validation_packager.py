@@ -412,12 +412,13 @@ class TestValidationRunEndpoint:
         )
         assert resp.status_code == 200
 
-    def test_valid_prd_status_is_packaged(self, client: TestClient, minimal_prd_dict: dict):
+    def test_valid_prd_status_is_completed(self, client: TestClient, minimal_prd_dict: dict):
+        # T06: /validation/run now returns status='completed' (was 'packaged' in T05 stub)
         resp = client.post(
             "/validation/run",
             json={"project_id": "test-proj", "prd": minimal_prd_dict},
         )
-        assert resp.json()["status"] == "packaged"
+        assert resp.json()["status"] == "completed"
 
     def test_valid_prd_schema_valid_true(self, client: TestClient, minimal_prd_dict: dict):
         resp = client.post(
@@ -489,21 +490,23 @@ class TestValidationRunEndpoint:
         )
         assert len(resp.json()["schema_errors"]) > 0
 
-    def test_result_is_none_stub(self, client: TestClient, minimal_prd_dict: dict):
-        """MiroFish result is None until T10 is implemented."""
+    def test_result_is_populated_by_mock_engine(self, client: TestClient, minimal_prd_dict: dict):
+        # T06: result is now populated by mock engine (no longer None)
         resp = client.post(
             "/validation/run",
             json={"project_id": "test-proj", "prd": minimal_prd_dict},
         )
-        assert resp.json()["result"] is None
+        assert resp.json()["result"] is not None
+        assert isinstance(resp.json()["result"]["summary"], str)
 
     def test_full_prd_run_succeeds(self, client: TestClient, full_prd_dict: dict):
+        # T06: full run returns status='completed'
         resp = client.post(
             "/validation/run",
             json={"project_id": "full-proj", "prd": full_prd_dict},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "packaged"
+        assert resp.json()["status"] == "completed"
 
 
 # ---------------------------------------------------------------------------
@@ -608,8 +611,9 @@ class TestSchemaCheckEndpoint:
 
 class TestMiroFishClientSignature:
     def test_run_validation_accepts_simulation_spec(self, minimal_prd_doc: PRDDocument):
-        """MiroFishClient.run_validation must accept SimulationSpec (T05 sig)."""
+        """MiroFishClient.run_validation must accept SimulationSpec and return ValidationResult (T06)."""
         import asyncio
+        from app.schemas import ValidationResult
         from app.services.mirofish_client import MiroFishClient
         spec = package_for_simulation(minimal_prd_doc)
         client_instance = MiroFishClient(
@@ -619,8 +623,9 @@ class TestMiroFishClientSignature:
         result = asyncio.get_event_loop().run_until_complete(
             client_instance.run_validation(spec)
         )
-        # Stub returns None — that's correct behaviour for T05
-        assert result is None
+        # T06: mock engine now returns a ValidationResult (not None)
+        assert result is not None
+        assert isinstance(result, ValidationResult)
 
     def test_mirofish_client_imports_simulation_spec(self):
         """mirofish_client must import SimulationSpec, not PRDDocument."""
