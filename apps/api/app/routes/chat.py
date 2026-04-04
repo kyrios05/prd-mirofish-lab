@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services.completeness import CompletenessResult, calculate_completeness, suggest_next_questions
+from app.services.markdown_renderer import render_prd_markdown
 from app.services.prd_generator import PRDGeneratorService
 from app.services.session_store import session_store
 
@@ -66,6 +67,10 @@ class ChatResponse(BaseModel):
     structured_prd: dict[str, Any] | None = Field(
         None,
         description="Current PRD draft as a plain dict (PRDDocument.model_dump()), or None if empty.",
+    )
+    prd_markdown: str | None = Field(
+        None,
+        description="Rendered PRD as a Markdown string (T04). None when structured_prd is None.",
     )
     draft_status: str = Field(
         ...,
@@ -190,11 +195,15 @@ async def send_message(body: ChatRequest) -> ChatResponse:
     completeness = calculate_completeness(updated_draft)
     next_questions = suggest_next_questions(completeness.missing, max_count=3)
 
-    # 4. Build response
+    # 4. Render Markdown (T04)
+    prd_markdown = render_prd_markdown(updated_draft) if updated_draft else None
+
+    # 5. Build response
     return ChatResponse(
         session_id=body.session_id,
         assistant_message=assistant_message,
         structured_prd=updated_draft,
+        prd_markdown=prd_markdown,
         draft_status=completeness.draft_status,
         completeness=_completeness_from_result(completeness),
         next_questions=next_questions,
