@@ -560,8 +560,10 @@ class TestMiroFishClientIntegration:
         import inspect
         from app.services import mirofish_client
         source = inspect.getsource(mirofish_client)
+        # T10 complete: mock engine is still imported as the mock-mode backend
         assert "run_mock_validation" in source
-        assert "TODO(T10)" in source
+        # T10 complete: MiroFishAdapter is now wired in (TODO removed)
+        assert "MiroFishAdapter" in source
 
 
 # ---------------------------------------------------------------------------

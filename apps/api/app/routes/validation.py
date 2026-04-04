@@ -7,9 +7,8 @@ Pipeline
     Step 1 (T02): JSON Schema validation via validate_prd()
     Step 2 (T02): Pydantic model construction — PRDDocument.model_validate()
     Step 3 (T05): Simulation spec packaging via package_for_simulation()
-    Step 4 (T06): Mock validation engine via run_mock_validation()
-                  Returns status='completed' with both spec and result.
-    Step 4 (T10): Replace mock engine with real MiroFish HTTP call.
+    Step 4 (T10): MiroFishClient.run_validation(spec) — mock by default;
+                       switches to real MiroFish in MIROFISH_MODE=live.
 
   POST /validation/schema-check  (T02, unchanged)
     JSON Schema validation only — no Pydantic, no packaging
@@ -33,7 +32,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from app.schemas import PRDDocument, SimulationSpec, ValidationResult
-from app.services.mock_validation_engine import run_mock_validation
+from app.services.mirofish_client import make_mirofish_client
 from app.services.validation_packager import package_for_simulation
 from app.validators.schema_validator import ValidationReport, validate_prd
 
@@ -70,15 +69,17 @@ class ValidationResponse(BaseModel):
     """
     Validation + packaging response.
 
-    schema_valid:    True iff the payload passed PRD_SCHEMA.json validation.
-    schema_errors:   List of JSON Schema violations (empty when schema_valid=True).
-    status:          One of:
-                       'schema_invalid'  — JSON Schema check failed
-                       'packaged'        — spec built, mock validation NOT run (/package endpoint)
-                       'completed'       — spec built + mock validation run (/run endpoint, T06)
-                       'schema_valid'    — schema-check only endpoint
-    simulation_spec: SimulationSpec.model_dump() when status in ('packaged','completed'); None otherwise.
-    result:          ValidationResult populated by mock engine (T06) on /run; None on /package.
+    schema_valid:      True iff the payload passed PRD_SCHEMA.json validation.
+    schema_errors:     List of JSON Schema violations (empty when schema_valid=True).
+    status:            One of:
+                         'schema_invalid'  — JSON Schema check failed
+                         'packaged'        — spec built, validation NOT run (/package endpoint)
+                         'completed'       — spec built + validation run (/run endpoint)
+                         'schema_valid'    — schema-check only endpoint
+    simulation_spec:   SimulationSpec.model_dump() when status in ('packaged','completed').
+    result:            ValidationResult on /run; None on /package.
+    validation_mode:   'mock' or 'live' — which engine produced the result.
+    job:               MiroFishJob.to_dict() when mode='live'; None in mock mode.
     """
 
     project_id: str
@@ -87,6 +88,9 @@ class ValidationResponse(BaseModel):
     status: str
     simulation_spec: dict[str, Any] | None = None
     result: ValidationResult | None = None
+    # T10 additions
+    validation_mode: str = "mock"          # "mock" | "live"
+    job: dict[str, Any] | None = None      # MiroFishJob.to_dict() in live mode
 
 
 # ---------------------------------------------------------------------------
@@ -152,17 +156,19 @@ def _validate_and_build_prd(
 @router.post("/run", response_model=ValidationResponse)
 async def run_validation(body: ValidationRequest) -> ValidationResponse:
     """
-    Validate a PRD document, package it as a SimulationSpec, and run mock validation.
+    Validate a PRD document, package it as a SimulationSpec, and run validation.
 
     Step 1 (T02): JSON Schema validation.
     Step 2 (T02): Pydantic model construction.
     Step 3 (T05): SimulationSpec packaging via package_for_simulation().
-    Step 4 (T06): Mock validation via run_mock_validation() → ValidationResult.
-    Step 4 (T10): TODO — replace mock engine with real MiroFish HTTP call.
+    Step 4 (T10): MiroFishClient.run_validation(spec).
+                  MIROFISH_MODE=mock (default) → mock engine (T06 behaviour).
+                  MIROFISH_MODE=live → real MiroFish adapter with fallback.
 
     Returns 422 if the request payload is malformed.
     Returns 200 with schema_valid=False if PRD_SCHEMA.json constraints fail.
-    Returns 200 with status='completed', simulation_spec, and result on success.
+    Returns 200 with status='completed', simulation_spec, result, and
+            validation_mode / job metadata on success.
     """
     report, prd_doc, early = _validate_and_build_prd(body.project_id, body.prd)
     if early is not None:
@@ -171,9 +177,15 @@ async def run_validation(body: ValidationRequest) -> ValidationResponse:
     # Step 3 (T05): Package into SimulationSpec
     spec: SimulationSpec = package_for_simulation(prd_doc)
 
-    # Step 4 (T06): Run mock validation engine → ValidationResult
-    # TODO(T10): replace with await mirofish_client.run_validation(spec)
-    result: ValidationResult = run_mock_validation(spec)
+    # Step 4 (T10): Run via MiroFishClient (mock or live depending on config)
+    client = make_mirofish_client()
+    result: ValidationResult | None = await client.run_validation(spec)
+
+    # Collect mode/job metadata for the response
+    validation_mode: str = client.mode if client.mode in ("mock", "live") else "mock"
+    job_dict: dict[str, Any] | None = (
+        client.last_job.to_dict() if client.last_job is not None else None
+    )
 
     return ValidationResponse(
         project_id=body.project_id,
@@ -182,6 +194,8 @@ async def run_validation(body: ValidationRequest) -> ValidationResponse:
         status="completed",
         simulation_spec=spec.model_dump(),
         result=result,
+        validation_mode=validation_mode,
+        job=job_dict,
     )
 
 
