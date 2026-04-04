@@ -1,21 +1,37 @@
 """
-routes/validation.py — PRD validation endpoint.
+routes/validation.py — PRD validation + simulation spec packaging endpoints.
 
-T02 scope: JSON Schema validation is wired in.
-           validate_prd() runs before Pydantic construction so boundary-level
-           errors (additionalProperties, required list fields, enum mismatches)
-           are caught and returned as structured errors.
+Pipeline
+--------
+  POST /validation/run
+    Step 1 (T02): JSON Schema validation via validate_prd()
+    Step 2 (T02): Pydantic model construction — PRDDocument.model_validate()
+    Step 3 (T05): Simulation spec packaging via package_for_simulation()
+    Step 4 (T10): MiroFish HTTP call — NOT YET; returns spec only
 
-NOTE(T05): Replace the stub body of run_validation() with mirofish_client.py
-           integration and populate ValidationResult from simulation output.
+  POST /validation/schema-check  (T02, unchanged)
+    JSON Schema validation only — no Pydantic, no packaging
+
+  POST /validation/package  (T05, new)
+    Schema validation + Pydantic construction + packaging only.
+    Lightweight endpoint for CI/CD spec inspection / debugging.
+    Does NOT trigger MiroFish simulation.
+
+Scope guard
+-----------
+- MiroFish HTTP invocation: T10
+- ValidationResult population from simulation: T06
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from app.schemas import PRDDocument, ValidationResult
+from app.schemas import PRDDocument, SimulationSpec, ValidationResult
+from app.services.validation_packager import package_for_simulation
 from app.validators.schema_validator import ValidationReport, validate_prd
 
 router = APIRouter(prefix="/validation", tags=["validation"])
@@ -24,8 +40,10 @@ router = APIRouter(prefix="/validation", tags=["validation"])
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
+
 class ValidationRequest(BaseModel):
-    """Request to trigger PRD validation.
+    """
+    Request to trigger PRD validation / packaging.
 
     The ``prd`` field accepts a raw dict so that JSON Schema validation
     can run on the original payload before Pydantic model construction.
@@ -46,111 +64,175 @@ class SchemaErrorItem(BaseModel):
 
 
 class ValidationResponse(BaseModel):
-    """Validation response.
+    """
+    Validation + packaging response.
 
-    schema_valid:   True iff the payload passed PRD_SCHEMA.json validation.
-    schema_errors:  List of JSON Schema violations (empty when schema_valid=True).
-    status:         'schema_invalid' | 'pending' | 'completed'
-    result:         MiroFish simulation result — populated in T05.
+    schema_valid:    True iff the payload passed PRD_SCHEMA.json validation.
+    schema_errors:   List of JSON Schema violations (empty when schema_valid=True).
+    status:          One of:
+                       'schema_invalid'  — JSON Schema check failed
+                       'packaged'        — spec built, awaiting MiroFish (T10)
+                       'schema_valid'    — schema-check only endpoint
+    simulation_spec: SimulationSpec.model_dump() when status='packaged'; None otherwise.
+    result:          MiroFish simulation result — populated in T06/T10 (always None here).
     """
 
     project_id: str
     schema_valid: bool
     schema_errors: list[SchemaErrorItem] = []
     status: str
+    simulation_spec: dict[str, Any] | None = None
     result: ValidationResult | None = None
 
 
 # ---------------------------------------------------------------------------
-# Route
+# Internal helpers
 # ---------------------------------------------------------------------------
-@router.post("/run", response_model=ValidationResponse)
-async def run_validation(body: ValidationRequest) -> ValidationResponse:
+
+def _schema_error_items(report: ValidationReport) -> list[SchemaErrorItem]:
+    return [
+        SchemaErrorItem(
+            message=err.message,
+            path=err.path,
+            schema_path=err.schema_path,
+            validator=err.validator,
+        )
+        for err in report.errors
+    ]
+
+
+def _validate_and_build_prd(
+    project_id: str,
+    prd_dict: dict,
+) -> tuple[ValidationReport, PRDDocument | None, ValidationResponse | None]:
     """
-    Validate a PRD document against PRD_SCHEMA.json and trigger simulation.
+    Run Step 1 (JSON Schema) + Step 2 (Pydantic).
 
-    Step 1 (T02): JSON Schema validation via validate_prd().
-    Step 2 (T05, TODO): Package PRD and call MiroFish client.
-
-    Returns 422 if the payload itself is malformed JSON structure.
-    Returns 200 with schema_valid=False if schema constraints are violated
-    (errors are surfaced in schema_errors for caller inspection).
+    Returns (report, prd_doc, early_response).
+    - If schema fails: early_response is set (caller should return it).
+    - If Pydantic fails: raises HTTP 500.
+    - On success: prd_doc is the constructed PRDDocument.
     """
-    # ── Step 1: JSON Schema validation (T02) ────────────────────────────────
-    report: ValidationReport = validate_prd(body.prd)
-
+    # Step 1: JSON Schema
+    report: ValidationReport = validate_prd(prd_dict)
     if not report.valid:
-        return ValidationResponse(
-            project_id=body.project_id,
+        return report, None, ValidationResponse(
+            project_id=project_id,
             schema_valid=False,
-            schema_errors=[
-                SchemaErrorItem(
-                    message=err.message,
-                    path=err.path,
-                    schema_path=err.schema_path,
-                    validator=err.validator,
-                )
-                for err in report.errors
-            ],
+            schema_errors=_schema_error_items(report),
             status="schema_invalid",
+            simulation_spec=None,
             result=None,
         )
 
-    # ── Step 2: Pydantic construction (safe — schema already validated) ──────
+    # Step 2: Pydantic construction
     try:
-        prd_doc: PRDDocument = PRDDocument.model_validate(body.prd)
+        prd_doc: PRDDocument = PRDDocument.model_validate(prd_dict)
     except Exception as exc:
-        # Pydantic errors after a passing schema check indicate a schema drift.
-        # Surface as 500 so it is visible and actionable.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=(
-                f"Schema passed JSON Schema validation but failed Pydantic construction. "
-                f"This indicates a schema drift — please update PRD_SCHEMA.json or the "
+                "Schema passed JSON Schema validation but failed Pydantic construction. "
+                "This indicates a schema drift — please update PRD_SCHEMA.json or the "
                 f"Pydantic models to stay in sync. Details: {exc}"
             ),
         ) from exc
 
-    # ── Step 3: MiroFish simulation (T05 — stub) ─────────────────────────────
-    # TODO(T05): Package prd_doc into MiroFish simulation spec and call
-    #            mirofish_client.run_validation(prd_doc).
-    _ = prd_doc  # suppress unused warning until T05
+    return report, prd_doc, None
+
+
+# ---------------------------------------------------------------------------
+# POST /validation/run  — full pipeline (T02 + T05, T10 stub)
+# ---------------------------------------------------------------------------
+
+@router.post("/run", response_model=ValidationResponse)
+async def run_validation(body: ValidationRequest) -> ValidationResponse:
+    """
+    Validate a PRD document and package it as a MiroFish simulation spec.
+
+    Step 1 (T02): JSON Schema validation.
+    Step 2 (T02): Pydantic model construction.
+    Step 3 (T05): SimulationSpec packaging via package_for_simulation().
+    Step 4 (T10): MiroFish HTTP call — NOT YET IMPLEMENTED.
+                  Returns spec with status='packaged' and simulation running.
+
+    Returns 422 if the request payload is malformed.
+    Returns 200 with schema_valid=False if PRD_SCHEMA.json constraints fail.
+    Returns 200 with status='packaged' and simulation_spec on success.
+    """
+    report, prd_doc, early = _validate_and_build_prd(body.project_id, body.prd)
+    if early is not None:
+        return early
+
+    # Step 3 (T05): Package into SimulationSpec
+    spec: SimulationSpec = package_for_simulation(prd_doc)
+
+    # Step 4 (T10): MiroFish HTTP call — stub
+    # TODO(T10): await mirofish_client.run_validation(spec)
 
     return ValidationResponse(
         project_id=body.project_id,
         schema_valid=True,
         schema_errors=[],
-        status="pending",
+        status="packaged",
+        simulation_spec=spec.model_dump(),
         result=None,
     )
 
 
 # ---------------------------------------------------------------------------
-# Schema-only validation endpoint (lightweight, no Pydantic construction)
+# POST /validation/schema-check  — schema only (T02, unchanged)
 # ---------------------------------------------------------------------------
+
 @router.post("/schema-check", response_model=ValidationResponse)
 async def schema_check(body: ValidationRequest) -> ValidationResponse:
     """
-    Run JSON Schema validation only — no Pydantic construction, no MiroFish.
+    Run JSON Schema validation only — no Pydantic construction, no packaging.
 
     Useful for:
-    - Quick client-side validation before submitting a full run
-    - CI/CD payload linting
-    - Debugging schema drift between PRD_SCHEMA.json and client payloads
+    - Quick client-side validation before submitting a full run.
+    - CI/CD payload linting.
+    - Debugging schema drift between PRD_SCHEMA.json and client payloads.
     """
     report: ValidationReport = validate_prd(body.prd)
     return ValidationResponse(
         project_id=body.project_id,
         schema_valid=report.valid,
-        schema_errors=[
-            SchemaErrorItem(
-                message=err.message,
-                path=err.path,
-                schema_path=err.schema_path,
-                validator=err.validator,
-            )
-            for err in report.errors
-        ],
+        schema_errors=_schema_error_items(report),
         status="schema_valid" if report.valid else "schema_invalid",
+        simulation_spec=None,
+        result=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /validation/package  — packaging only (T05, new)
+# ---------------------------------------------------------------------------
+
+@router.post("/package", response_model=ValidationResponse)
+async def package_only(body: ValidationRequest) -> ValidationResponse:
+    """
+    Run schema validation + Pydantic construction + SimulationSpec packaging.
+
+    Does NOT trigger a MiroFish simulation run.  Intended for:
+    - CI/CD spec shape inspection before integration testing.
+    - Debugging packaging logic independently of MiroFish availability.
+    - Generating simulation_spec for manual review.
+
+    Returns 200 with status='packaged' and simulation_spec on success.
+    Returns 200 with schema_valid=False on schema violation.
+    """
+    report, prd_doc, early = _validate_and_build_prd(body.project_id, body.prd)
+    if early is not None:
+        return early
+
+    spec: SimulationSpec = package_for_simulation(prd_doc)
+
+    return ValidationResponse(
+        project_id=body.project_id,
+        schema_valid=True,
+        schema_errors=[],
+        status="packaged",
+        simulation_spec=spec.model_dump(),
         result=None,
     )
