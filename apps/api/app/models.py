@@ -1,14 +1,91 @@
 """
-models.py — Compatibility shim.
+models.py — Explicit re-exports from app.schemas.
 
-All domain models have been moved to app.schemas (T01 refactor).
-This file re-exports everything from schemas so that any existing code
-that imports from app.models continues to work without modification.
+T01 originally created this file as a ``from app.schemas import *`` shim.
+T03 replaces the wildcard with explicit named imports to restore IDE
+auto-completion and eliminate the hidden dependency surface.
 
-TODO(T03): Remove this file once all route/service imports are updated
-           to use `from app.schemas import ...` directly.
+All routes and services SHOULD import directly from ``app.schemas``.
+This module exists only for any third-party code that may still reference
+``app.models`` — it will be removed in a future cleanup ticket.
 """
 
-# Re-export everything from the new schemas package
-from app.schemas import *  # noqa: F401, F403
-from app.schemas import __all__  # noqa: F401
+from app.schemas import (  # noqa: F401
+    # Enums
+    FeaturePriority,
+    IntegrationType,
+    Language,
+    Platform,
+    PrdStatus,
+    Priority,
+    ProductStage,
+    Severity,
+    SourceMode,
+    TimelineConfidence,
+    ValidationTemplate,
+    # Sub-models (common)
+    Feature,
+    Integration,
+    Metric,
+    Persona,
+    Requirement,
+    Risk,
+    Stakeholder,
+    TaggedItem,
+    ValidationResult,
+    # Section models (prd)
+    Artifacts,
+    Delivery,
+    Metadata,
+    Problem,
+    Product,
+    Requirements,
+    Scope,
+    Solution,
+    Source,
+    SuccessMetrics,
+    Users,
+    ValidationSection,
+    # Root document
+    PRDDocument,
+)
+
+__all__ = [
+    # Enums
+    "FeaturePriority",
+    "IntegrationType",
+    "Language",
+    "Platform",
+    "PrdStatus",
+    "Priority",
+    "ProductStage",
+    "Severity",
+    "SourceMode",
+    "TimelineConfidence",
+    "ValidationTemplate",
+    # Sub-models
+    "Feature",
+    "Integration",
+    "Metric",
+    "Persona",
+    "Requirement",
+    "Risk",
+    "Stakeholder",
+    "TaggedItem",
+    "ValidationResult",
+    # Section models
+    "Artifacts",
+    "Delivery",
+    "Metadata",
+    "Problem",
+    "Product",
+    "Requirements",
+    "Scope",
+    "Solution",
+    "Source",
+    "SuccessMetrics",
+    "Users",
+    "ValidationSection",
+    # Root
+    "PRDDocument",
+]
