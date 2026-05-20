@@ -60,6 +60,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Simulation Tuning
+    mirofish_max_rounds: int = Field(
+        default=50,
+        description="Maximum simulation rounds for MiroFish engine.",
+    )
+    mirofish_enable_memory: bool = Field(
+        default=True,
+        description="Enable knowledge graph memory updates for agents during simulation.",
+    )
+    mirofish_agent_count: int = Field(
+        default=10,
+        description="Target number of agents to participate in simulation.",
+    )
+
     # OpenAI-compatible LLM
     openai_api_base: str = Field(
         default="",
@@ -69,8 +83,30 @@ class Settings(BaseSettings):
         default="",
         description="OpenAI-compatible API key",
     )
+    openai_model_name: str = Field(
+        default="qwen3.5:27b",
+        description="LLM model name to use for analysis.",
+    )
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # Ollama Local LLM
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description="Ollama local API base URL",
+    )
+    ollama_model: str = Field(
+        default="qwen3.5:27b",
+        description="Ollama model name to use for PRD generation.",
+    )
+    ollama_timeout: int = Field(
+        default=300,
+        description="Timeout in seconds for Ollama LLM requests.",
+    )
+    ollama_enabled: bool = Field(
+        default=True,
+        description="Enable/Disable local Ollama LLM (False forces mock mode).",
+    )
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
