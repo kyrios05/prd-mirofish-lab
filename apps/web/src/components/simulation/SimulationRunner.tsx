@@ -95,40 +95,75 @@ const METADATA_DICTIONARY: Record<string, { role: string; persona: string; goal:
     persona: "50만원 이하 자율 환불 시 셀러 대금 유출 차단 및 플랫폼 신뢰성 정산 리스크를 검증하는 입점 판매자 대변인입니다.",
     goal: "AI 오작동에 의한 셀러의 직접적 대금 손실 리스크가 없도록 책임 보전 보증과 승인 큐 개입 권한을 확보하고자 합니다."
   },
+  
+  // 리스크 접두사
   "Risk_PII": {
-    role: "Security Risk",
-    persona: "외부 LLM 통신 시 민감한 개인식별정보(PII)가 무단 노출될 기술적 취약점입니다.",
-    goal: "50ms 이내 실시간 마스킹 실패 시 금융 컴플라이언스 및 ISMS-P 박탈 초래 여부를 분석합니다."
+    role: "보안 리스크 (Security Risk)",
+    persona: "외부 LLM 통신 시 개인식별정보(PII)가 유출되거나 Zero-Retention 협약에 위배되는 기술적 위협 요인입니다.",
+    goal: "50ms 이내 마스킹 실패 시 금융 컴플라이언스 위반 및 ISMS-P 인증 통과 불가 여부를 감사합니다."
   },
-  "Risk_Liability": {
-    role: "Legal Risk",
-    persona: "AI 에이전트의 판단 오류로 인한 고액 이중 환불 등의 손실 귀속 법적 분쟁 리스크입니다.",
-    goal: "상담원 개입(HITL) 및 셀러 승인 큐 결합이 부재할 시 법적 책임 면책이 불가함을 검증합니다."
+  "Risk_Latency": {
+    role: "성능 리스크 (Latency Risk)",
+    persona: "마스킹 전처리 필터 홉(Hop) 추가 및 실시간 이벤트 렌더링 부하로 인한 E2E Latency 1.5초 돌파 위험입니다.",
+    goal: "실시간 웹소켓 오버헤드와 API 게이트웨이 정체 병목을 측정하여 화면 렉을 방지하는지 평가합니다."
   },
-  "Risk_TokenCost": {
-    role: "Financial Risk",
-    persona: "글로벌 API 호출 급증 및 SRE 분산 클라우드 가용망 구성에 의한 비용 과다 우려입니다.",
-    goal: "상담 비용 30% 절감 목표 실현을 위해 성과형 과금 모델(TCR 연동)을 수립하도록 감시합니다."
+  "Risk_SLA": {
+    role: "안정성 리스크 (SLA Risk)",
+    persona: "단일 LLM 장애 또는 동시 트래픽 폭증 시 백업 이중화 부재로 가용성 99.9% 보증이 무너지는 장애 위협입니다.",
+    goal: "네트워크 단절 시 300ms 로컬 Ollama 엔진 전환 등 Failover 프록시 정상 작동을 보증합니다."
   },
-  "Risk_SellerRevolt": {
-    role: "Ecosystem Risk",
-    persona: "50만원 이하의 자율 환불 위임 시 발생할 수 있는 셀러 정산 대금 오유출 저항 및 이탈 리스크입니다.",
-    goal: "플랫폼 전액 보증 협약이 선결되지 않으면 판매자의 시스템 참여 이탈이 우려됩니다."
+  "Risk_Seller": {
+    role: "비즈니스 리스크 (Seller Risk)",
+    persona: "50만원 이하 AI 자율 환불 권한 오작동 시 입점 셀러의 정산금 오유출 및 이탈 리스크입니다.",
+    goal: "AI 판정 신뢰도 임계치 설정 및 오정산 피해에 대한 플랫폼 책임 보전 합의가 타당한지 검증합니다."
   },
-  "Sol_HITLQueue": {
-    role: "Architectural Solution",
-    persona: "신뢰도 85% 미만 또는 50만원 초과 건을 상담원/셀러 승인 큐로 실시간 분리하는 관리자 위젯입니다.",
-    goal: "법률적 면책과 셀러 대금 보호, CS 노조 갈등 우려를 동시에 상쇄하는 핵심 통제 장치입니다."
+
+  // 요구사항 접두사
+  "Req_FR": {
+    role: "기능적 요구사항 (Functional Req)",
+    persona: "50만원 이하 자율 환불(FR-01), HWP 표 파싱 RAG(FR-02), HITL 승인 큐(FR-03) 등 솔루션의 핵심 기능 명세입니다.",
+    goal: "RAG 컨텍스트의 표 분석 정확도와 판단 불가 시 상담원 대기 큐 이관 로직이 무결하게 작동하는지 검증합니다."
   },
-  "Sol_ShadowMode": {
-    role: "Operational Solution",
-    persona: "GA 출시 전 4주 동안 실제 DB 수정 없이 백그라운드 모의 트래픽만 흘려 안전성을 실측하는 검증 절차입니다.",
-    goal: "RAG 환각율 3% 미만 검증 및 마스킹 가용성 SLA 99.9%를 프로덕션 환경에서 실증합니다."
+  "Req_NFR": {
+    role: "비기능적 요구사항 (Non-Functional Req)",
+    persona: "E2E 지연 1.5초 이내(NFR-01), Zero-Retention 아키텍처(NFR-02), 로컬 Failover(NFR-03) 등의 품질 요건입니다.",
+    goal: "ISMS-P, CSAP 규제 통과를 충족하며 목표 서비스 가용성 SLA 99.9%를 유지하는지 확인합니다."
   },
-  "Milestone_GA": {
-    role: "Release Milestone",
-    persona: "모든 전문가 집단의 합의(Consensus)와 리스크 완화책이 정밀하게 통합된 2026.09 정식 런칭 목표입니다.",
-    goal: "성공적인 B2B 엔터프라이즈 자율 실행 에이전트 런칭을 달성합니다."
+
+  // 지표
+  "Metric": {
+    role: "핵심 성과 지표 (Success Metrics)",
+    persona: "업무완결율(TCR) 40% 이상, 비용 30% 절감, 환각율 3% 미만 감시 등 프로젝트 성공 가이드라인입니다.",
+    goal: "전문가 Swarm이 논의를 거쳐 설정한 최종 목표 지표가 기획 의도에 무결하게 도달하는지 감사합니다."
+  },
+
+  // 솔루션 접두사
+  "Sol_HITL": {
+    role: "아키텍처 솔루션 (HITL Solution)",
+    persona: "신뢰도 85% 미만 건의 원클릭 상담원 승인/반려 모바일 UI 위젯 및 승인 대기 큐 아키텍처입니다.",
+    goal: "최종 대금 인출 행위자를 인간으로 격리함으로써 AI 오작동에 대한 법률적 면책과 셀러 대금 유출 위험을 상쇄합니다."
+  },
+  "Sol_Shadow": {
+    role: "운영 솔루션 (Shadow Testing)",
+    persona: "GA 런칭 직전 4주 동안 실제 DB 수정 없이 백그라운드 모의 트래픽만 흘려 정확도 및 레이턴시를 실측하는 검증 절차입니다.",
+    goal: "RAG 환각율 3% 미만 통제 상태와 CS 노조 갈등 우려를 불식시킬 상담원 직무 업스킬링 통계를 도출합니다."
+  },
+  "Sol_Failover": {
+    role: "인프라 솔루션 (Failover Solution)",
+    persona: "외부 LLM 마비 시 300ms 이내에 로컬 Ollama 엔진으로 자동 스위칭하는 이중화 프록시 가용 체계입니다.",
+    goal: "SRE 관점의 SLA 99.9% 목표 수호와 호출 토큰비 30% ROI 절감 모델의 실현 가능성을 입증합니다."
+  },
+
+  // 프로젝트 마일스톤 및 시스템 모듈
+  "Milestone": {
+    role: "배포 마일스톤 (Milestone)",
+    persona: "6월 BMT 기술 검증 통과 및 9월 정식 GA 출시를 달성하기 위한 개발 프로젝트 로드맵 이정표입니다.",
+    goal: "시뮬레이션 합의 체계 완성 상태를 바탕으로 차기 2차 파이프라인 개방 조건 만족 여부를 검증합니다."
+  },
+  "Sys": {
+    role: "시스템 컴포넌트 (System)",
+    persona: "로컬 Ollama 엔진, API Gateway, PII 필터링 및 RAG 벡터 DB 등 Simply AI Agent 아키텍처를 구성하는 물리 모듈입니다.",
+    goal: "각 모듈 간의 통신 병목 및 데이터 프라이버시 침해 지점을 감시하고 이중화 안정성을 검증합니다."
   }
 };
 
@@ -166,33 +201,59 @@ export function SimulationRunner({ performAction }: Props) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Initialize new nodes with clustered starting positions to jump-start clustering
+  useEffect(() => {
+    if (graphData.nodes && graphData.nodes.length > 0) {
+      const centerX = dimensions.width / 2;
+      const centerY = dimensions.height / 2;
+      const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
+      
+      graphData.nodes.forEach((node: any) => {
+        if (node.x === undefined || node.y === undefined) {
+          const group = node.group || 0;
+          const angle = (group / 7) * 2 * Math.PI;
+          node.x = centerX + radius * Math.cos(angle) + (Math.random() - 0.5) * 60;
+          node.y = centerY + radius * Math.sin(angle) + (Math.random() - 0.5) * 60;
+        }
+      });
+    }
+  }, [graphData, dimensions]);
+
   // Configure Force Layout Clustering
   useEffect(() => {
     if (fgRef.current) {
       const fg = fgRef.current;
+      
+      // 1. Center force 제거 (노드들이 한 군데 뭉치는 주범)
+      fg.d3Force('center', null);
+
+      // 2. Link force의 강도와 거리 조율
       fg.d3Force('link')
-        ?.distance(50)
-        ?.strength(0.35);
+        ?.distance(35)
+        ?.strength(0.4);
 
-      fg.d3Force('charge')?.strength(-100);
+      // 3. Repulsion (서로 밀어내는 힘) 강하게 적용
+      fg.d3Force('charge')?.strength(-160);
 
+      // 4. Group 기반 중심 좌표 유도 force
       const centerX = dimensions.width / 2;
       const centerY = dimensions.height / 2;
-      const radius = Math.min(dimensions.width, dimensions.height) * 0.33;
+      const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
 
       fg.d3Force('x', d3.forceX().x((d: any) => {
         const group = d.group || 0;
         const angle = (group / 7) * 2 * Math.PI;
         return centerX + radius * Math.cos(angle);
-      }).strength(0.22));
+      }).strength(0.35));
 
       fg.d3Force('y', d3.forceY().y((d: any) => {
         const group = d.group || 0;
         const angle = (group / 7) * 2 * Math.PI;
         return centerY + radius * Math.sin(angle);
-      }).strength(0.22));
+      }).strength(0.35));
 
-      fg.d3Force('collide', d3.forceCollide().radius(22));
+      // 5. Collision 힘 (노드가 겹치지 않게)
+      fg.d3Force('collide', d3.forceCollide().radius(20));
 
       fg.d3ReheatSimulation();
     }
@@ -291,11 +352,34 @@ export function SimulationRunner({ performAction }: Props) {
   };
 
   const nodeLabelHandler = (node: any) => {
-    const meta = METADATA_DICTIONARY[node.id];
+    let role = node.role;
+    let persona = node.summary || node.persona;
+    let goal = node.goal;
+    
+    if (!role || !persona || !goal) {
+      let meta = METADATA_DICTIONARY[node.id];
+      if (!meta) {
+        const nodeId = node.id || "";
+        const matchedKey = Object.keys(METADATA_DICTIONARY).find(key => 
+          nodeId.startsWith(key) || nodeId.includes(key) || key.includes(nodeId)
+        );
+        if (matchedKey) {
+          meta = METADATA_DICTIONARY[matchedKey];
+        }
+      }
+      
+      if (meta) {
+        role = role || meta.role;
+        persona = persona || meta.persona;
+        goal = goal || meta.goal;
+      }
+    }
+    
+    role = role || "이해관계자";
+    persona = persona || "Simply AI Agent PRD 시뮬레이션의 검증 노드입니다.";
+    goal = goal || "PRD 요구사항 적합성 및 안정성 검증";
+    
     const name = node.label || node.id;
-    const role = meta ? meta.role : "이해관계자";
-    const persona = meta ? meta.persona : "상세 설명 정보가 제공되지 않은 노드입니다.";
-    const goal = meta ? meta.goal : "분석 목표 정보 없음";
     
     return `
       <div style="
@@ -387,7 +471,29 @@ export function SimulationRunner({ performAction }: Props) {
           return log.agent_name === cName || log.agent_name?.includes(cName) || cName.includes(log.agent_name || '');
         });
 
-        return isAgentMatch || isMentioned || isConnectedAgentMatch;
+        // 4) 키워드 매핑 사전 기반 매칭
+        const TOPIC_KEYWORDS: Record<string, string[]> = {
+          "pii": ["pii", "개인정보", "마스킹", "보안", "필터", "유출", "retention", "감사", "공개", "저장", "isms"],
+          "latency": ["latency", "지연", "속도", "시간", "초", "렉", "웹소켓", "성능", "대시보드", "응답"],
+          "sla": ["sla", "가용성", "failover", "장애", "프록시", "ollama", "이중화", "가동", "무중단"],
+          "seller": ["셀러", "정산", "판매자", "대금", "환불", "오환불", "손실", "이탈", "수수료"],
+          "fr": ["fr", "기능", "환불", "hwp", "파서", "표", "셀", "hitl", "대기", "승인", "취소", "조회"],
+          "nfr": ["nfr", "지연", "속도", "retention", "보안", "failover", "ollama", "대체", "isms"],
+          "metric": ["tcr", "완결", "비용", "절감", "원가", "환각", "정확도", "지표", "목표"],
+          "hitl": ["hitl", "승인", "대기", "큐", "위젯", "알림톡", "상담원", "개입", "판정", "감사관"],
+          "shadow": ["shadow", "섀도우", "테스트", "모의", "실측", "검증", "노조", "교육", "훈련", "업스킬링"],
+          "failover": ["failover", "ollama", "프록시", "이중화", "장애", "원가", "비용", "서버", "우회"]
+        };
+
+        const matchedKeywords = Object.keys(TOPIC_KEYWORDS)
+          .filter(key => selectedNode.id.toLowerCase().includes(key) || nodeName.toLowerCase().includes(key))
+          .flatMap(key => TOPIC_KEYWORDS[key]);
+        
+        const isKeywordMatch = matchedKeywords.some(kw => 
+          log.content?.toLowerCase().includes(kw)
+        );
+
+        return isAgentMatch || isMentioned || isConnectedAgentMatch || isKeywordMatch;
       }
       return false;
     }
