@@ -22,7 +22,7 @@ export interface UseValidationReturn {
   /** Error message string, or null */
   error: string | null;
   /** Run validation against the given PRD dict */
-  runValidation: (projectId: string, prd: Record<string, unknown>) => Promise<void>;
+  runValidation: (projectId: string, prd: Record<string, unknown>, live?: boolean) => Promise<void>;
   /** Clear the current validation result */
   clearResult: () => void;
 }
@@ -37,12 +37,12 @@ export function useValidation(): UseValidationReturn {
   const [error, setError] = useState<string | null>(null);
 
   const runValidation = useCallback(
-    async (projectId: string, prd: Record<string, unknown>) => {
+    async (projectId: string, prd: Record<string, unknown>, live?: boolean) => {
       setIsRunning(true);
       setError(null);
 
       try {
-        const response = await apiRunValidation({ project_id: projectId, prd });
+        const response = await apiRunValidation({ project_id: projectId, prd, live });
         setValidationResponse(response);
       } catch (err) {
         const msg = err instanceof Error ? err.message : '검증 실행에 실패했습니다.';

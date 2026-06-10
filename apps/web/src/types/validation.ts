@@ -18,6 +18,8 @@ export interface ValidationRequest {
   project_id: string;
   /** Raw PRD dict (PRDDocument.model_dump() output). */
   prd: Record<string, unknown>;
+  /** Run simulation using Qwen engine (live) instead of Mock engine. */
+  live?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -7,33 +7,158 @@
   background: var(--bg-app);
 }
 
+/* ── Panel grid: flex row (2-column slide) ───────────── */
 .panelGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: var(--panel-gap);
-  min-height: 0;
+  display: flex;
+  flex-direction: row;
   overflow: hidden;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+  min-height: 0;
 }
 
-/* ── Responsive ─────────────────────────────────────────── */
-@media (max-width: 1024px) {
-  .panelGrid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .validationPanel {
-    display: none;
-  }
+/* ── Left column (Chat) ─────────────────────────────── */
+.leftColumn {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+  /* When right panel is closed: fill everything */
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@media (max-width: 640px) {
-  .panelGrid {
-    grid-template-columns: 1fr;
-  }
+.leftColumnFull {
+  width: 100%;
 }
 
-/* ── Header ─────────────────────────────────────────────── */
+.leftColumnNarrow {
+  width: 45%;
+  min-width: 320px;
+}
+
+/* ── Panel handle (toggle tab) ──────────────────────── */
+.panelHandle {
+  width: 20px;
+  flex-shrink: 0;
+  background: var(--bg-panel-header);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+  z-index: 10;
+}
+
+.panelHandle:hover {
+  background: var(--border);
+}
+
+.panelHandleIcon {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  letter-spacing: 0.1em;
+}
+
+/* ── Right column (PRD Preview + Validation) ─────────── */
+.rightColumn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  /* slide in/out */
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s ease;
+}
+
+.rightColumnHidden {
+  transform: translateX(100%);
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+  flex: 0;
+  overflow: hidden;
+}
+
+.rightColumnVisible {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* ── Right top (PRD Preview) ─────────────────────────── */
+.rightTop {
+  flex: 7; /* 70% */
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Right divider ───────────────────────────────────── */
+.rightDivider {
+  height: 0;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-panel-header);
+}
+
+/* ── Right bottom (Validation) ───────────────────────── */
+.rightBottom {
+  flex: 3; /* 30% */
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid var(--border);
+  transition: flex 0.3s ease;
+}
+
+.rightBottomClosed {
+  flex: 0;
+}
+
+/* ── Validation sub-header (collapse toggle) ─────────── */
+.validationSubHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 1rem;
+  background: var(--bg-panel-header);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.validationSubHeader:hover {
+  background: var(--border);
+}
+
+.validationSubTitle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.validationToggleIcon {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+
+.validationToggleIconOpen {
+  transform: rotate(180deg);
+}
+
+/* ── Header ─────────────────────────────────────────── */
 .header {
   display: flex;
   align-items: center;
@@ -71,7 +196,7 @@
   font-family: var(--font-mono);
 }
 
-/* ── Footer ─────────────────────────────────────────────── */
+/* ── Footer ─────────────────────────────────────────── */
 .footer {
   display: flex;
   align-items: center;
@@ -79,38 +204,73 @@
   padding: 0 1.25rem;
   background: var(--bg-panel);
   border-top: 1px solid var(--border);
-  gap: 1rem;
+  gap: 2rem;
   flex-shrink: 0;
+  height: 100%;
+}
+
+.footerLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0;
 }
 
 .footerProgress {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  flex: 1;
-  min-width: 0;
 }
 
 .progressLabel {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
 }
 
 .progressBar {
-  flex: 1;
-  height: 8px;
+  width: 240px;
+  height: 6px;
   background: var(--border);
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
-  max-width: 300px;
 }
 
 .progressFill {
   height: 100%;
   background: linear-gradient(90deg, #3b82f6, #10b981);
-  border-radius: 4px;
+  border-radius: 3px;
   transition: width 0.4s ease;
+}
+
+.sectionChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.sectionChip {
+  font-size: 0.62rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: transparent;
+  white-space: nowrap;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sectionChipDone {
+  background: #d1fae5;
+  border-color: #10b981;
+  color: #065f46;
+  font-weight: 600;
 }
 
 .footerActions {
@@ -118,3 +278,62 @@
   align-items: center;
   gap: 0.5rem;
 }
+
+/* Live Mode Toggle styles */
+.liveToggleContainer {
+  display: flex;
+  align-items: center;
+  margin-right: 0.5rem;
+}
+
+.liveToggleBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease-in-out;
+  border: 1px solid var(--border);
+  background: rgba(30, 41, 59, 0.4);
+  backdrop-filter: blur(4px);
+  color: var(--text-secondary);
+}
+
+.liveToggleDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: all 0.25s ease-in-out;
+}
+
+.liveOn {
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #10b981;
+  box-shadow: 0 0 10px rgba(10, 253, 148, 0.2);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.liveOn .liveToggleDot {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.liveOff {
+  border-color: rgba(100, 116, 139, 0.4);
+  color: #94a3b8;
+  box-shadow: 0 0 10px rgba(100, 116, 139, 0.1);
+  background: rgba(100, 116, 139, 0.08);
+}
+
+.liveOff .liveToggleDot {
+  background: #64748b;
+  box-shadow: 0 0 8px #64748b;
+}
+
+.liveToggleBtn:hover {
+  transform: translateY(-1px);
+}
+
