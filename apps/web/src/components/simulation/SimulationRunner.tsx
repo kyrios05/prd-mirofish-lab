@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
+import * as d3 from 'd3';
 
 interface Props {
   performAction: (actionId: string, payload?: any) => Promise<void>;
@@ -21,8 +22,8 @@ interface GraphNode {
 }
 
 interface GraphLink {
-  source: string;
-  target: string;
+  source: any;
+  target: any;
 }
 
 interface GraphData {
@@ -143,6 +144,7 @@ export function SimulationRunner({ performAction }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [simulationMode, setSimulationMode] = useState<'mock' | 'live' | 'live_fallback' | null>(null);
+  const fgRef = useRef<any>(null);
 
   useEffect(() => {
     if (containerRef.current) {
@@ -163,6 +165,39 @@ export function SimulationRunner({ performAction }: Props) {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Configure Force Layout Clustering
+  useEffect(() => {
+    if (fgRef.current) {
+      const fg = fgRef.current;
+      fg.d3Force('link')
+        ?.distance(50)
+        ?.strength(0.35);
+
+      fg.d3Force('charge')?.strength(-100);
+
+      const centerX = dimensions.width / 2;
+      const centerY = dimensions.height / 2;
+      const radius = Math.min(dimensions.width, dimensions.height) * 0.33;
+
+      fg.d3Force('x', d3.forceX().x((d: any) => {
+        const group = d.group || 0;
+        const angle = (group / 7) * 2 * Math.PI;
+        return centerX + radius * Math.cos(angle);
+      }).strength(0.22));
+
+      fg.d3Force('y', d3.forceY().y((d: any) => {
+        const group = d.group || 0;
+        const angle = (group / 7) * 2 * Math.PI;
+        return centerY + radius * Math.sin(angle);
+      }).strength(0.22));
+
+      fg.d3Force('collide', d3.forceCollide().radius(22));
+
+      fg.d3ReheatSimulation();
+    }
+  }, [fgRef, dimensions, graphData]);
+
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -325,7 +360,34 @@ export function SimulationRunner({ performAction }: Props) {
       if (!selectedNode) return true;
       if (log.type === 'agent_post') {
         const nodeName = selectedNode.label || selectedNode.id;
-        return log.agent_name === nodeName || log.agent_name?.includes(nodeName) || nodeName.includes(log.agent_name || '');
+        const isAgentMatch = log.agent_name === nodeName || 
+                             log.agent_name?.includes(nodeName) || 
+                             nodeName.includes(log.agent_name || '');
+                             
+        const isMentioned = log.content?.toLowerCase().includes(nodeName.toLowerCase()) || 
+                            log.content?.toLowerCase().includes(selectedNode.id.toLowerCase()) ||
+                            (nodeName.length > 3 && log.content?.toLowerCase().includes(nodeName.substring(0, 4).toLowerCase()));
+                            
+        const connectedNodeIds = graphData.links
+          .filter(l => {
+            const sId = l.source.id || l.source;
+            const tId = l.target.id || l.target;
+            return sId === selectedNodeId || tId === selectedNodeId;
+          })
+          .map(l => {
+            const sId = l.source.id || l.source;
+            const tId = l.target.id || l.target;
+            return sId === selectedNodeId ? tId : sId;
+          });
+        
+        const isConnectedAgentMatch = connectedNodeIds.some(cId => {
+          const cNode = graphData.nodes.find(n => n.id === cId);
+          if (!cNode) return false;
+          const cName = cNode.label || cNode.id;
+          return log.agent_name === cName || log.agent_name?.includes(cName) || cName.includes(log.agent_name || '');
+        });
+
+        return isAgentMatch || isMentioned || isConnectedAgentMatch;
       }
       return false;
     }
@@ -352,6 +414,7 @@ export function SimulationRunner({ performAction }: Props) {
       {/* Network Graph Area */}
       <div ref={containerRef} style={{ flex: 2, background: '#020617', position: 'relative' }}>
         <ForceGraph2D
+          ref={fgRef}
           width={dimensions.width}
           height={dimensions.height}
           graphData={graphData}
