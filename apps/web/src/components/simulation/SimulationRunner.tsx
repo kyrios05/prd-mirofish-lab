@@ -206,14 +206,41 @@ export function SimulationRunner({ performAction }: Props) {
     if (graphData.nodes && graphData.nodes.length > 0) {
       const centerX = dimensions.width / 2;
       const centerY = dimensions.height / 2;
-      const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
+      const radius = Math.min(dimensions.width, dimensions.height) * 0.13;
       
       graphData.nodes.forEach((node: any) => {
         if (node.x === undefined || node.y === undefined) {
           const group = node.group || 0;
           const angle = (group / 7) * 2 * Math.PI;
-          node.x = centerX + radius * Math.cos(angle) + (Math.random() - 0.5) * 60;
-          node.y = centerY + radius * Math.sin(angle) + (Math.random() - 0.5) * 60;
+          
+          const crossGroupLinks = graphData.links.filter((l: any) => {
+            const sId = l.source.id || l.source;
+            const tId = l.target.id || l.target;
+            if (sId !== node.id && tId !== node.id) return false;
+            const otherId = sId === node.id ? tId : sId;
+            const otherNode = graphData.nodes.find(n => n.id === otherId);
+            return otherNode && otherNode.group !== group;
+          });
+          const crossCount = crossGroupLinks.length;
+          
+          const clusterX = centerX + radius * Math.cos(angle);
+          const clusterY = centerY + radius * Math.sin(angle);
+          
+          let initX = clusterX;
+          let initY = clusterY;
+          
+          if (crossCount >= 1) {
+            const weight = Math.min(0.35 + crossCount * 0.15, 0.90);
+            initX = clusterX * (1 - weight) + centerX * weight;
+            initY = clusterY * (1 - weight) + centerY * weight;
+          } else {
+            const pushFactor = 1.15;
+            initX = centerX + (clusterX - centerX) * pushFactor;
+            initY = centerY + (clusterY - centerY) * pushFactor;
+          }
+          
+          node.x = initX + (Math.random() - 0.5) * 45;
+          node.y = initY + (Math.random() - 0.5) * 45;
         }
       });
     }
@@ -227,33 +254,67 @@ export function SimulationRunner({ performAction }: Props) {
         // 1. Center force 제거 (노드들이 한 군데 뭉치는 주범)
         fg.d3Force('center', null);
 
-        // 2. Link force의 강도와 거리 조율
+        // 2. Link force의 강도와 거리 조율 (오밀조밀하게 모이도록 소폭 좁힘)
         fg.d3Force('link')
-          ?.distance(35)
-          ?.strength(0.4);
+          ?.distance(25)
+          ?.strength(0.45);
 
-        // 3. Repulsion (서로 밀어내는 힘) 강하게 적용
-        fg.d3Force('charge')?.strength(-160);
+        // 3. Repulsion (서로 밀어내는 힘) 완화하여 밀집도 증가
+        fg.d3Force('charge')?.strength(-110);
 
         // 4. Group 기반 중심 좌표 유도 force
         const centerX = dimensions.width / 2;
         const centerY = dimensions.height / 2;
-        const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
+        const radius = Math.min(dimensions.width, dimensions.height) * 0.13;
 
         fg.d3Force('x', forceX().x((d: any) => {
           const group = d.group || 0;
           const angle = (group / 7) * 2 * Math.PI;
-          return centerX + radius * Math.cos(angle);
+          const clusterX = centerX + radius * Math.cos(angle);
+          
+          const crossCount = graphData.links.filter((l: any) => {
+            const sId = l.source.id || l.source;
+            const tId = l.target.id || l.target;
+            if (sId !== d.id && tId !== d.id) return false;
+            const otherId = sId === d.id ? tId : sId;
+            const otherNode = graphData.nodes.find(n => n.id === otherId);
+            return otherNode && otherNode.group !== group;
+          }).length;
+          
+          if (crossCount >= 1) {
+            const weight = Math.min(0.35 + crossCount * 0.15, 0.90);
+            return clusterX * (1 - weight) + centerX * weight;
+          } else {
+            const pushFactor = 1.15;
+            return centerX + (clusterX - centerX) * pushFactor;
+          }
         }).strength(0.35));
 
         fg.d3Force('y', forceY().y((d: any) => {
           const group = d.group || 0;
           const angle = (group / 7) * 2 * Math.PI;
-          return centerY + radius * Math.sin(angle);
+          const clusterY = centerY + radius * Math.sin(angle);
+          
+          const crossCount = graphData.links.filter((l: any) => {
+            const sId = l.source.id || l.source;
+            const tId = l.target.id || l.target;
+            if (sId !== d.id && tId !== d.id) return false;
+            const otherId = sId === d.id ? tId : sId;
+            const otherNode = graphData.nodes.find(n => n.id === otherId);
+            return otherNode && otherNode.group !== group;
+          }).length;
+          
+          if (crossCount >= 1) {
+            const weight = Math.min(0.35 + crossCount * 0.15, 0.90);
+            return clusterY * (1 - weight) + centerY * weight;
+          } else {
+            const pushFactor = 1.15;
+            return centerY + (clusterY - centerY) * pushFactor;
+          }
         }).strength(0.35));
 
         // 5. Collision 힘 (노드가 겹치지 않게)
-        fg.d3Force('collide', forceCollide().radius(20));
+        fg.d3Force('collide', forceCollide().radius(18));
 
         fg.d3ReheatSimulation();
       } catch (err) {

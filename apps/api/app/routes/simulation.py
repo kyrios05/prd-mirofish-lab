@@ -204,84 +204,280 @@ async def start_simulation(payload: dict[str, Any]):
             return {"status": "started", "simulation_id": "sim_mock_error_fallback"}
         raise HTTPException(status_code=500, detail=str(e))
 
+# Comprehensive 77-node and 154-link mock database for scalable visualization
+ALL_MOCK_NODES = [
+    # 1. 12인의 전문가 (Group 0: 기획/개발, 1: 보안/규제, 2: 재무/인프라/QA, 3: 현업/생태계)
+    {"id": "PM_Kim", "group": 0, "label": "PM 김철수"},
+    {"id": "Sales_Oh", "group": 3, "label": "영업팀장 오세현"},
+    {"id": "HR_Seo", "group": 3, "label": "CS/HR 서진우"},
+    {"id": "Sec_Lee", "group": 1, "label": "보안감사관 이지훈"},
+    {"id": "Legal_Choi", "group": 1, "label": "법무팀장 최윤서"},
+    {"id": "Arch_Park", "group": 0, "label": "아키텍트 박팀장"},
+    {"id": "CFO_Woo", "group": 2, "label": "CFO 정우진"},
+    {"id": "QA_Kang", "group": 2, "label": "QA매니저 강혜원"},
+    {"id": "SRE_Han", "group": 2, "label": "SRE 한상민"},
+    {"id": "FE_Han", "group": 0, "label": "프론트 한아름"},
+    {"id": "Seller_Min", "group": 3, "label": "셀러대표 민경아"},
+    {"id": "Design_Jung", "group": 0, "label": "디자이너 정희채"},
+    # 2. 리스크 노드 (Group 4: 도출된 리스크)
+    {"id": "Risk_PII_1", "group": 4, "label": "PII 개인정보 노출 취약점"},
+    {"id": "Risk_PII_2", "group": 4, "label": "ISMS-P 인증 박탈 우려"},
+    {"id": "Risk_PII_3", "group": 4, "label": "CSAP 공공 보안 인증 규정 저촉"},
+    {"id": "Risk_PII_4", "group": 4, "label": "외부 LLM 전송 시 민감 로그 유출"},
+    {"id": "Risk_PII_5", "group": 4, "label": "Zero-Retention 위반 제재"},
+    {"id": "Risk_Latency_1", "group": 4, "label": "E2E 지연시간 1.5초 돌파"},
+    {"id": "Risk_Latency_2", "group": 4, "label": "PII 필터 처리에 의한 프론트 렉"},
+    {"id": "Risk_Latency_3", "group": 4, "label": "웹소켓 실시간 이벤트 오버헤드"},
+    {"id": "Risk_Latency_4", "group": 4, "label": "API 게이트웨이 동기 응답 정체"},
+    {"id": "Risk_Latency_5", "group": 4, "label": "네트워크 패킷 전처리 병목"},
+    {"id": "Risk_SLA_1", "group": 4, "label": "단일 LLM 마비 시 전체 중단"},
+    {"id": "Risk_SLA_2", "group": 4, "label": "트래픽 폭증 시 인프라 스케일링 병목"},
+    {"id": "Risk_SLA_3", "group": 4, "label": "대기 시간 초과로 인한 세션 유실"},
+    {"id": "Risk_SLA_4", "group": 4, "label": "Failover 프록시 오동작 장애"},
+    {"id": "Risk_SLA_5", "group": 4, "label": "네트워크 유실로 인한 상태 불일치"},
+    {"id": "Risk_Seller_1", "group": 4, "label": "오환불로 인한 셀러 대금 유출"},
+    {"id": "Risk_Seller_2", "group": 4, "label": "정산 불일치로 입점 셀러 반발"},
+    {"id": "Risk_Seller_3", "group": 4, "label": "AI 판정 신뢰도 오류 피해 전가"},
+    {"id": "Risk_Seller_4", "group": 4, "label": "50만원 한도 자율 집행 불안"},
+    {"id": "Risk_Seller_5", "group": 4, "label": "플랫폼 신뢰도 훼손 및 판매자 이탈"},
+    # 3. 요구사항 노드 (Group 3: 요구사항)
+    {"id": "Req_FR_1", "group": 3, "label": "FR-01: 50만원 이하 자율 환불"},
+    {"id": "Req_FR_2", "group": 3, "label": "FR-02: HWP 표 파싱 표 직렬화"},
+    {"id": "Req_FR_3", "group": 3, "label": "FR-03: HITL 승인 대기 큐 연동"},
+    {"id": "Req_FR_4", "group": 3, "label": "FR-04: 할루시네이션 3% 통제"},
+    {"id": "Req_FR_5", "group": 3, "label": "FR-05: 모바일 간편 승인 위젯"},
+    {"id": "Req_NFR_1", "group": 3, "label": "NFR-01: E2E 1.5초 이내 속도"},
+    {"id": "Req_NFR_2", "group": 3, "label": "NFR-02: Zero-Retention 아키텍처"},
+    {"id": "Req_NFR_3", "group": 3, "label": "NFR-03: 로컬 Failover 프록시"},
+    {"id": "Req_NFR_4", "group": 3, "label": "NFR-04: 이커머스 API 게이트웨이"},
+    {"id": "Req_NFR_5", "group": 3, "label": "NFR-05: 실시간 웹소켓 이벤트 렌더"},
+    {"id": "Metric_1", "group": 3, "label": "성공지표: TCR 40% 이상"},
+    {"id": "Metric_2", "group": 3, "label": "운영 비용: 30% 이상 절감"},
+    {"id": "Metric_3", "group": 3, "label": "SLA 보장: 가용성 99.9%"},
+    {"id": "Metric_4", "group": 3, "label": "가드레일: 환각율 3% 미만"},
+    {"id": "Metric_5", "group": 3, "label": "지연속도: E2E Latency 1.5초 준수율 95%"},
+    # 4. 솔루션 노드 (Group 5: 대안 및 솔루션)
+    {"id": "Sol_HITL_1", "group": 5, "label": "HITL 승인 대기 큐 아키텍처"},
+    {"id": "Sol_HITL_2", "group": 5, "label": "신뢰도 85% 임계값 자동 분류"},
+    {"id": "Sol_HITL_3", "group": 5, "label": "스마트폰 알림톡 간편 UI 발송"},
+    {"id": "Sol_HITL_4", "group": 5, "label": "1클릭 간편 승인 위젯 컴포넌트"},
+    {"id": "Sol_HITL_5", "group": 5, "label": "상담원 Audit 직무 업스킬링 로드맵"},
+    {"id": "Sol_Shadow_1", "group": 5, "label": "4주간의 Shadow Mode 모의 검증"},
+    {"id": "Sol_Shadow_2", "group": 5, "label": "백그라운드 가상 트래픽 인프라"},
+    {"id": "Sol_Shadow_3", "group": 5, "label": "실시간 PII 마스킹 속도 측정기"},
+    {"id": "Sol_Shadow_4", "group": 5, "label": "RAG 표 파싱 정확도 모니터링"},
+    {"id": "Sol_Shadow_5", "group": 5, "label": "CS 노조 소통 및 안정성 실측 리포트"},
+    {"id": "Sol_Failover_1", "group": 5, "label": "로컬 Failover LLM 프록시"},
+    {"id": "Sol_Failover_2", "group": 5, "label": "300ms 로컬 Ollama 자동 스위칭"},
+    {"id": "Sol_Failover_3", "group": 5, "label": "비동기 전처리 프록시 서버 이중화"},
+    {"id": "Sol_Failover_4", "group": 5, "label": "Zero-Retention 메모리 관리체계"},
+    {"id": "Sol_Failover_5", "group": 5, "label": "호출 원가 30% 통제 프레임워크"},
+    # 5. 마일스톤 및 시스템 (Group 6: 마일스톤, 기타)
+    {"id": "Milestone_GA", "group": 6, "label": "2026.09 정식 런칭"},
+    {"id": "Milestone_BMT", "group": 6, "label": "6월 BMT 기술 검증"},
+    {"id": "Sys_Ollama", "group": 6, "label": "로컬 Ollama 엔진"},
+    {"id": "Sys_API_Gateway", "group": 6, "label": "API Gateway 컴포넌트"},
+    {"id": "Sys_Seller_App", "group": 6, "label": "셀러 전용 모바일 앱"},
+    {"id": "Sys_Admin_Console", "group": 6, "label": "상담원 어드민 대시보드"},
+    {"id": "Sys_Database", "group": 6, "label": "이커머스 운영 DB"},
+    {"id": "Sys_Notification_Talk", "group": 6, "label": "카카오 알림톡 서비스"},
+    {"id": "Sys_Auth_Server", "group": 6, "label": "OAuth 인증 서버"},
+    {"id": "Sys_PII_Masking_Filter", "group": 6, "label": "실시간 PII 필터링"},
+    {"id": "Sys_HWP_Parser", "group": 6, "label": "고정밀 HWP 파서"},
+    {"id": "Sys_RAG_Vector_DB", "group": 6, "label": "RAG 벡터 DB"},
+    {"id": "Sys_Docker_Network", "group": 6, "label": "도커 가상 네트워크"},
+    {"id": "Sys_Consensus", "group": 6, "label": "전문가 합의체 완성"},
+    {"id": "Milestone_GA_2", "group": 6, "label": "2차 파이프라인 개방"}
+]
+
+ALL_MOCK_LINKS = [
+    # 1. 전문가 간 연결 (22개)
+    {"source": "PM_Kim", "target": "Sales_Oh"},
+    {"source": "PM_Kim", "target": "HR_Seo"},
+    {"source": "PM_Kim", "target": "Sec_Lee"},
+    {"source": "PM_Kim", "target": "Legal_Choi"},
+    {"source": "PM_Kim", "target": "CFO_Woo"},
+    {"source": "PM_Kim", "target": "Arch_Park"},
+    {"source": "Arch_Park", "target": "SRE_Han"},
+    {"source": "Arch_Park", "target": "FE_Han"},
+    {"source": "Arch_Park", "target": "QA_Kang"},
+    {"source": "Sales_Oh", "target": "Seller_Min"},
+    {"source": "Seller_Min", "target": "CFO_Woo"},
+    {"source": "QA_Kang", "target": "FE_Han"},
+    {"source": "QA_Kang", "target": "SRE_Han"},
+    {"source": "SRE_Han", "target": "FE_Han"},
+    {"source": "Design_Jung", "target": "FE_Han"},
+    {"source": "Design_Jung", "target": "PM_Kim"},
+    {"source": "Legal_Choi", "target": "Sec_Lee"},
+    {"source": "HR_Seo", "target": "Seller_Min"},
+    {"source": "Sales_Oh", "target": "CFO_Woo"},
+    {"source": "HR_Seo", "target": "CFO_Woo"},
+    {"source": "Sec_Lee", "target": "Arch_Park"},
+    {"source": "Legal_Choi", "target": "Arch_Park"},
+    # 2. 전문가 -> 리스크 노드 연결 (20개)
+    {"source": "Sec_Lee", "target": "Risk_PII_1"},
+    {"source": "Sec_Lee", "target": "Risk_PII_2"},
+    {"source": "Sec_Lee", "target": "Risk_PII_3"},
+    {"source": "Sec_Lee", "target": "Risk_PII_4"},
+    {"source": "Sec_Lee", "target": "Risk_PII_5"},
+    {"source": "FE_Han", "target": "Risk_Latency_1"},
+    {"source": "FE_Han", "target": "Risk_Latency_2"},
+    {"source": "FE_Han", "target": "Risk_Latency_3"},
+    {"source": "FE_Han", "target": "Risk_Latency_4"},
+    {"source": "FE_Han", "target": "Risk_Latency_5"},
+    {"source": "SRE_Han", "target": "Risk_SLA_1"},
+    {"source": "SRE_Han", "target": "Risk_SLA_2"},
+    {"source": "SRE_Han", "target": "Risk_SLA_3"},
+    {"source": "SRE_Han", "target": "Risk_SLA_4"},
+    {"source": "SRE_Han", "target": "Risk_SLA_5"},
+    {"source": "Seller_Min", "target": "Risk_Seller_1"},
+    {"source": "Seller_Min", "target": "Risk_Seller_2"},
+    {"source": "Seller_Min", "target": "Risk_Seller_3"},
+    {"source": "Seller_Min", "target": "Risk_Seller_4"},
+    {"source": "Seller_Min", "target": "Risk_Seller_5"},
+    # 3. 전문가 -> 요구사항 노드 연결 (15개)
+    {"source": "PM_Kim", "target": "Req_FR_1"},
+    {"source": "PM_Kim", "target": "Req_FR_2"},
+    {"source": "PM_Kim", "target": "Req_FR_3"},
+    {"source": "PM_Kim", "target": "Req_FR_4"},
+    {"source": "PM_Kim", "target": "Req_FR_5"},
+    {"source": "Arch_Park", "target": "Req_NFR_1"},
+    {"source": "Arch_Park", "target": "Req_NFR_2"},
+    {"source": "Arch_Park", "target": "Req_NFR_3"},
+    {"source": "Arch_Park", "target": "Req_NFR_4"},
+    {"source": "Arch_Park", "target": "Req_NFR_5"},
+    {"source": "CFO_Woo", "target": "Metric_1"},
+    {"source": "CFO_Woo", "target": "Metric_2"},
+    {"source": "CFO_Woo", "target": "Metric_3"},
+    {"source": "CFO_Woo", "target": "Metric_4"},
+    {"source": "CFO_Woo", "target": "Metric_5"},
+    # 4. 전문가 -> 솔루션 노드 연결 (15개)
+    {"source": "Design_Jung", "target": "Sol_HITL_1"},
+    {"source": "Design_Jung", "target": "Sol_HITL_2"},
+    {"source": "Design_Jung", "target": "Sol_HITL_3"},
+    {"source": "Design_Jung", "target": "Sol_HITL_4"},
+    {"source": "Design_Jung", "target": "Sol_HITL_5"},
+    {"source": "QA_Kang", "target": "Sol_Shadow_1"},
+    {"source": "QA_Kang", "target": "Sol_Shadow_2"},
+    {"source": "QA_Kang", "target": "Sol_Shadow_3"},
+    {"source": "QA_Kang", "target": "Sol_Shadow_4"},
+    {"source": "QA_Kang", "target": "Sol_Shadow_5"},
+    {"source": "SRE_Han", "target": "Sol_Failover_1"},
+    {"source": "SRE_Han", "target": "Sol_Failover_2"},
+    {"source": "SRE_Han", "target": "Sol_Failover_3"},
+    {"source": "SRE_Han", "target": "Sol_Failover_4"},
+    {"source": "SRE_Han", "target": "Sol_Failover_5"},
+    # 5. 요구사항 -> 리스크 연계 (20개)
+    {"source": "Req_FR_1", "target": "Risk_Seller_1"},
+    {"source": "Req_FR_2", "target": "Risk_Seller_2"},
+    {"source": "Req_FR_3", "target": "Risk_Seller_3"},
+    {"source": "Req_FR_4", "target": "Risk_Seller_4"},
+    {"source": "Req_FR_5", "target": "Risk_Seller_5"},
+    {"source": "Req_NFR_1", "target": "Risk_Latency_1"},
+    {"source": "Req_NFR_2", "target": "Risk_Latency_2"},
+    {"source": "Req_NFR_3", "target": "Risk_Latency_3"},
+    {"source": "Req_NFR_4", "target": "Risk_Latency_4"},
+    {"source": "Req_NFR_5", "target": "Risk_Latency_5"},
+    {"source": "Metric_1", "target": "Risk_SLA_1"},
+    {"source": "Metric_2", "target": "Risk_SLA_2"},
+    {"source": "Metric_3", "target": "Risk_SLA_3"},
+    {"source": "Metric_4", "target": "Risk_SLA_4"},
+    {"source": "Metric_5", "target": "Risk_SLA_5"},
+    {"source": "Req_NFR_1", "target": "Risk_PII_1"},
+    {"source": "Req_NFR_2", "target": "Risk_PII_2"},
+    {"source": "Req_NFR_3", "target": "Risk_PII_3"},
+    {"source": "Req_NFR_4", "target": "Risk_PII_4"},
+    {"source": "Req_NFR_5", "target": "Risk_PII_5"},
+    # 6. 솔루션 -> 리스크 완화 해결선 (20개)
+    {"source": "Sol_HITL_1", "target": "Risk_Seller_1"},
+    {"source": "Sol_HITL_2", "target": "Risk_Seller_2"},
+    {"source": "Sol_HITL_3", "target": "Risk_Seller_3"},
+    {"source": "Sol_HITL_4", "target": "Risk_Seller_4"},
+    {"source": "Sol_HITL_5", "target": "Risk_Seller_5"},
+    {"source": "Sol_Shadow_1", "target": "Risk_Latency_1"},
+    {"source": "Sol_Shadow_2", "target": "Risk_Latency_2"},
+    {"source": "Sol_Shadow_3", "target": "Risk_Latency_3"},
+    {"source": "Sol_Shadow_4", "target": "Risk_Latency_4"},
+    {"source": "Sol_Shadow_5", "target": "Risk_Latency_5"},
+    {"source": "Sol_Failover_1", "target": "Risk_SLA_1"},
+    {"source": "Sol_Failover_2", "target": "Risk_SLA_2"},
+    {"source": "Sol_Failover_3", "target": "Risk_SLA_3"},
+    {"source": "Sol_Failover_4", "target": "Risk_SLA_4"},
+    {"source": "Sol_Failover_5", "target": "Risk_SLA_5"},
+    {"source": "Sol_Shadow_1", "target": "Risk_PII_1"},
+    {"source": "Sol_Shadow_2", "target": "Risk_PII_2"},
+    {"source": "Sol_Shadow_3", "target": "Risk_PII_3"},
+    {"source": "Sol_Shadow_4", "target": "Risk_PII_4"},
+    {"source": "Sol_Shadow_5", "target": "Risk_PII_5"},
+    # 7. 시스템 노드 및 마일스톤 연결선 (42개) -> 총 154개
+    {"source": "Sys_Ollama", "target": "Sys_Failover_Proxy"},
+    {"source": "Sys_Failover_Proxy", "target": "Sys_API_Gateway"},
+    {"source": "Sys_API_Gateway", "target": "Sys_PII_Masking_Filter"},
+    {"source": "Sys_API_Gateway", "target": "Sys_Admin_Console"},
+    {"source": "Sys_API_Gateway", "target": "Sys_Seller_App"},
+    {"source": "Sys_Seller_App", "target": "Sys_Notification_Talk"},
+    {"source": "Sys_Admin_Console", "target": "Sys_Notification_Talk"},
+    {"source": "Sys_API_Gateway", "target": "Sys_Database"},
+    {"source": "Sys_API_Gateway", "target": "Sys_Auth_Server"},
+    {"source": "Sys_HWP_Parser", "target": "Sys_RAG_Vector_DB"},
+    {"source": "Sys_RAG_Vector_DB", "target": "Sys_Ollama"},
+    {"source": "Sys_Docker_Network", "target": "Sys_Ollama"},
+    {"source": "Sys_Docker_Network", "target": "Sys_API_Gateway"},
+    {"source": "Sys_Consensus", "target": "Milestone_GA"},
+    {"source": "Sys_Consensus", "target": "Milestone_BMT"},
+    {"source": "Milestone_BMT", "target": "Milestone_GA"},
+    {"source": "PM_Kim", "target": "Sys_Consensus"},
+    {"source": "Sales_Oh", "target": "Sys_Consensus"},
+    {"source": "HR_Seo", "target": "Sys_Consensus"},
+    {"source": "Sec_Lee", "target": "Sys_Consensus"},
+    {"source": "Legal_Choi", "target": "Sys_Consensus"},
+    {"source": "Arch_Park", "target": "Sys_Consensus"},
+    {"source": "CFO_Woo", "target": "Sys_Consensus"},
+    {"source": "QA_Kang", "target": "Sys_Consensus"},
+    {"source": "SRE_Han", "target": "Sys_Consensus"},
+    {"source": "FE_Han", "target": "Sys_Consensus"},
+    {"source": "Seller_Min", "target": "Sys_Consensus"},
+    {"source": "Design_Jung", "target": "Sys_Consensus"},
+    {"source": "Milestone_GA", "target": "Milestone_GA_2"},
+    {"source": "Sys_Ollama", "target": "Milestone_GA"},
+    {"source": "Sys_API_Gateway", "target": "Milestone_GA"},
+    {"source": "Sys_Seller_App", "target": "Milestone_GA"},
+    {"source": "Sys_Admin_Console", "target": "Milestone_GA"},
+    {"source": "Sys_Database", "target": "Milestone_GA"},
+    {"source": "Sys_HWP_Parser", "target": "Milestone_GA"},
+    {"source": "Sys_RAG_Vector_DB", "target": "Milestone_GA"},
+    {"source": "Sys_Notification_Talk", "target": "Milestone_GA"},
+    {"source": "Sys_Auth_Server", "target": "Milestone_GA"},
+    {"source": "Sys_PII_Masking_Filter", "target": "Milestone_GA"},
+    {"source": "Sys_Failover_Proxy", "target": "Milestone_GA"},
+    {"source": "Sys_Docker_Network", "target": "Milestone_GA"},
+    {"source": "Sys_Consensus", "target": "Milestone_GA_2"}
+]
+
 async def _simulation_event_generator(mode: str = "mock", reason: str = None):
-    """Rich SSE stream for simulation with 30+ agent interactions and high-density debate."""
+    """Rich SSE stream for simulation with 35+ high-density stakeholder debate interactions."""
     import json
     yield f'data: {json.dumps({"type": "mode_check", "mode": mode, "reason": reason})}\n\n'
     if reason:
         yield f'data: {json.dumps({"type": "system_log", "content": f"🚨 Live Engine Fallback: {reason}", "timestamp": datetime.now(timezone.utc).isoformat(), "mode": mode})}\n\n'
     def _ts(): return datetime.now(timezone.utc).isoformat()
     
-    # 12명의 참여 전문가 노드 정의
-    stage1_nodes = [
-        {"id": "PM_Kim", "group": 0, "label": "PM 김철수"},
-        {"id": "Sales_Oh", "group": 3, "label": "영업팀장 오세현"},
-        {"id": "HR_Seo", "group": 3, "label": "CS/HR 서진우"}
-    ]
-    stage1_links = [
-        {"source": "PM_Kim", "target": "Sales_Oh"},
-        {"source": "PM_Kim", "target": "HR_Seo"}
-    ]
+    # 5-stage progressive graph slices matching the 70+ node / 140+ edge requirements
+    stage1_nodes = ALL_MOCK_NODES[:15]
+    stage1_links = ALL_MOCK_LINKS[:25]
     
-    stage2_nodes = stage1_nodes + [
-        {"id": "Sec_Lee", "group": 1, "label": "보안감사관 이지훈"},
-        {"id": "Legal_Choi", "group": 1, "label": "법무팀장 최윤서"},
-        {"id": "Arch_Park", "group": 0, "label": "아키텍트 박팀장"}
-    ]
-    stage2_links = stage1_links + [
-        {"source": "PM_Kim", "target": "Sec_Lee"},
-        {"source": "PM_Kim", "target": "Legal_Choi"},
-        {"source": "Sec_Lee", "target": "Legal_Choi"},
-        {"source": "Sec_Lee", "target": "Arch_Park"}
-    ]
+    stage2_nodes = ALL_MOCK_NODES[:32]
+    stage2_links = ALL_MOCK_LINKS[:58]
     
-    stage3_nodes = stage2_nodes + [
-        {"id": "CFO_Woo", "group": 2, "label": "CFO 정우진"},
-        {"id": "QA_Kang", "group": 2, "label": "QA매니저 강혜원"},
-        {"id": "SRE_Han", "group": 2, "label": "SRE 한상민"},
-        {"id": "FE_Han", "group": 0, "label": "프론트 한아름"},
-        {"id": "Seller_Min", "group": 3, "label": "셀러대표 민경아"}
-    ]
-    stage3_links = stage2_links + [
-        {"source": "PM_Kim", "target": "CFO_Woo"},
-        {"source": "Arch_Park", "target": "SRE_Han"},
-        {"source": "Arch_Park", "target": "FE_Han"},
-        {"source": "Arch_Park", "target": "QA_Kang"},
-        {"source": "Sales_Oh", "target": "Seller_Min"},
-        {"source": "Seller_Min", "target": "CFO_Woo"},
-        {"source": "QA_Kang", "target": "FE_Han"},
-        {"source": "QA_Kang", "target": "SRE_Han"},
-        {"source": "SRE_Han", "target": "FE_Han"}
-    ]
-
-    stage4_nodes = stage3_nodes + [
-        {"id": "Design_Jung", "group": 0, "label": "디자이너 정희채"},
-        {"id": "Sol_HITLQueue", "group": 5, "label": "HITL 승인 대기 큐"},
-        {"id": "Sol_ShadowMode", "group": 5, "label": "4주 섀도우 모드 검증"}
-    ]
-    stage4_links = stage3_links + [
-        {"source": "Design_Jung", "target": "FE_Han"},
-        {"source": "Design_Jung", "target": "PM_Kim"},
-        {"source": "Design_Jung", "target": "Sol_HITLQueue"},
-        {"source": "FE_Han", "target": "Sol_HITLQueue"},
-        {"source": "Arch_Park", "target": "Sol_ShadowMode"},
-        {"source": "QA_Kang", "target": "Sol_ShadowMode"},
-        {"source": "Seller_Min", "target": "Sol_HITLQueue"},
-        {"source": "Legal_Choi", "target": "Sol_HITLQueue"},
-        {"source": "SRE_Han", "target": "Sol_ShadowMode"},
-        {"source": "HR_Seo", "target": "Sol_HITLQueue"}
-    ]
-
-    final_nodes = stage4_nodes + [
-        {"id": "Milestone_GA", "group": 6, "label": "2026.09 정식 런칭"}
-    ]
-    final_links = stage4_links + [
-        {"source": "PM_Kim", "target": "Milestone_GA"},
-        {"source": "Sales_Oh", "target": "Milestone_GA"},
-        {"source": "CFO_Woo", "target": "Milestone_GA"},
-        {"source": "HR_Seo", "target": "Milestone_GA"}
-    ]
-
+    stage3_nodes = ALL_MOCK_NODES[:48]
+    stage3_links = ALL_MOCK_LINKS[:92]
+    
+    stage4_nodes = ALL_MOCK_NODES[:64]
+    stage4_links = ALL_MOCK_LINKS[:122]
+    
+    final_nodes = ALL_MOCK_NODES
+    final_links = ALL_MOCK_LINKS
+    
     def _msg(t, c, n=None, at=None, p=None, nodes=None, links=None):
         data = {"type": t, "content": c, "timestamp": _ts(), "mode": mode}
         if n: data["agent_name"] = n
@@ -289,146 +485,163 @@ async def _simulation_event_generator(mode: str = "mock", reason: str = None):
         if p is not None: data["progress"] = p
         if nodes: data["nodes"] = nodes
         if links: data["links"] = links
-        import json
         return f'data: {json.dumps(data)}\n\n'
 
-    # 1단계: 비즈니스 야망과 현업의 현실적 저항 (1% - 15%)
-    yield _msg("system_log", "Initializing MiroFish Enterprise Environment v12.5.0...", p=0.01)
-    await asyncio.sleep(0.4)
+    # 1단계: 비즈니스 가치 달성 vs CS 운영 조직 저항 (1% - 20%)
+    yield _msg("system_log", "Initializing High-Density MiroFish Mock Agent Engine v13.0...", p=0.01)
+    await asyncio.sleep(0.3)
     
     yield _msg("graph_update", "Stage 1: Business Vision & HR Resistance Initiated", p=0.05, nodes=stage1_nodes, links=stage1_links)
-    await asyncio.sleep(0.4)
+    await asyncio.sleep(0.3)
 
-    yield _msg("agent_post", "이번 Simply AI Agent는 기업용 레거시와 연동하여 배송조회, 주문 취소, 50만원 이하의 자율 환불 액션을 독립적으로 완수해 상담원 개입을 최소화하고 CS 완결율(TCR) 40% 이상을 기한 내 달성해야 합니다. 9월 정식 출시를 목표로 달립시다.", "PM 김철수", "Product Manager", 0.07)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "좋습니다. 대형 이커머스나 금융권 B2B 딜을 따내려면 실시간 액션 기능이 필수적입니다. 상담원 응답 대기로 이탈하던 고객을 즉각적으로 잡아두려면 자율 환불 처리가 세일즈 치트키가 될 것입니다.", "영업팀장 오세현", "B2B Sales Lead", 0.10)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "현업 운영 조직의 인적 갈등도 직시해야 합니다. AI 완결율(TCR)이 목표치인 40%를 넘어서는 순간, 기존 상담 조직의 구조조정 불안감이 폭발하여 CS 노조의 격렬한 반발이 예상됩니다. 남겨진 고숙련 상담원들의 심리적 저항을 제어하고, 이들을 고난도 전문 상담으로 매끄럽게 재배치(Upskilling)하는 내부 HR 정책적 로드맵이 PRD delivery 장에 결합되지 않으면 현장 도입 시 100% 사보타주가 발생합니다.", "CS/HR 서진우", "CS & HR Manager", 0.12)
-    await asyncio.sleep(1.2)
-
-    yield _msg("agent_post", "서 매니저님, CS 비용 30% 절감은 경영진의 확고한 ROI 목표입니다. 자율 처리를 포기하거나 타협하는 것은 불가능합니다. 계획대로 밀어붙여야 합니다.", "PM 김철수", "Product Manager", 0.14)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "김 부장님, 고용 불안이 해소되지 않으면 현장 도입 단계에서 상담원들이 고의로 RAG 입력 데이터 분류를 흐리거나 시스템 오류를 모른 척 방치하는 식으로 은밀한 무력화 운동을 벌일 겁니다. 현장을 모르는 속도주의는 파멸을 부릅니다!", "CS/HR 서진우", "CS & HR Manager", 0.17)
-    await asyncio.sleep(1.2)
-
-    # 2단계: 보안 감사 및 법률적 장벽의 개입 (15% - 40%)
-    yield _msg("graph_update", "Stage 2: Regulatory & Legal Objections Raised", p=0.20, nodes=stage2_nodes, links=stage2_links)
-    await asyncio.sleep(0.4)
-
-    yield _msg("agent_post", "외부 LLM 호출 시 민감한 개인정보(PII) 유출 위험이 매우 큽니다. B2B 엔터프라이즈 환경에서 50ms 이내 초고속 PII 마스킹 차단율 100%를 무결하게 증명하고, 데이터 미저장(Zero-Retention) 아키텍처를 적용하지 못하면 ISMS-P 등 금융/기업 보안 규제를 통과하지 못해 계약 자체가 취소됩니다.", "보안감사관 이지훈", "Security Auditor", 0.23)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "동의합니다. AI 에이전트가 독단적으로 대출 상담을 오도하거나 잘못된 환불 처리를 수행했을 때 발생하는 손실과 배상 책임의 법률적 책임 소재가 모호합니다. RAG 오작동 방지를 위한 안전 승인 절차가 PRD에 보장되어야 계약서 작성이 가능합니다.", "법무팀장 최윤서", "Legal Counsel", 0.26)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "맞습니다. RAG 답변뿐 아니라 AI가 실제 데이터베이스에 환불 쿼리를 날리기 전에 승인을 받는 통제 컴포넌트가 결합되어야 법률적 방어가 가능합니다.", "보안감사관 이지훈", "Security Auditor", 0.29)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "보안 감사관님과 법무팀장님의 엄격한 컴플라이언스를 만족시키려면 API 게이트웨이 앞단에 다중 마스킹 전처리 컴포넌트를 이중화해야 합니다. 이는 전체 시스템 레이아웃을 복잡하게 만들어 당초 PM님이 제시한 E2E Latency 1.5초 기준을 맞추는 데 심각한 기술적 장벽이 됩니다.", "아키텍트 박팀장", "Lead Architect", 0.32)
-    await asyncio.sleep(1.2)
-
-    yield _msg("agent_post", "맞습니다! 마스킹 전처리가 브라우저 렌더링에 동기적으로 결합되면 E2E 레이턴시가 3초 이상 지연될 것입니다. 보안 필터 때문에 UX가 완전히 망가질 겁니다. 고객이 다 이탈할 텐데 의미가 있습니까?", "프론트 한아름", "Frontend Engineer", 0.35)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "프론트 한아름 엔지니어님, 레이턴시 준수도 중요하지만 금융 규정상 실시간 PII 마스킹은 절대 우회할 수 없습니다. UX 만족도가 법률 위반에 따른 수십억 대의 과징금과 브랜드 영업정지 위험보다 중요할 순 없습니다. 보안이 우선입니다.", "보안감사관 이지훈", "Security Auditor", 0.38)
-    await asyncio.sleep(1.2)
-
-    yield _msg("agent_post", "보안 감사관님, 응답 속도가 3초를 넘으면 고객 이탈률이 급증해 TCR 40% 달성이 불가능합니다! 비동기 마스킹 처리나 다른 기술적 대안을 마련해야 합니다.", "프론트 한아름", "Frontend Engineer", 0.40)
-    await asyncio.sleep(1.1)
-
-    # 3단계: 품질, 비용, 인프라의 다각적 대립 (40% - 60%)
-    yield _msg("graph_update", "Stage 3: Infrastructure, QA, & Financial Constraints", p=0.42, nodes=stage3_nodes, links=stage3_links)
-    await asyncio.sleep(0.4)
-
-    yield _msg("agent_post", "그렇다면 중간에 비동기 PII 전처리 프록시 서버를 두어 마스킹을 수행하되, FE와 웹소켓 실시간 이벤트 루프를 엮으면 UX 상의 병목을 다소 완화할 수 있을 것 같습니다. 하지만 여전히 토큰 비용과 자원이 발목을 잡을 겁니다.", "아키텍트 박팀장", "Lead Architect", 0.44)
-    await asyncio.sleep(1.2)
-
-    yield _msg("agent_post", "재무팀 입장에서는 토큰 효율을 보수적으로 봐야 합니다. 복잡한 PII 마스킹 프롬프트와 매끄럽지 않은 프롬프트 추가로 LLM 토큰 비용이 급상승한다면, 기존 상담 인건비 감축액을 초과하여 ROI가 음수가 될 수 있습니다. 호출 원가 30% 한도 제어가 설계에 반영되어야 예산을 승인합니다.", "CFO 정우진", "Financial Director", 0.47)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "환각율(Hallucination) 관리도 시급합니다! HWP 등 고객사의 복잡한 매뉴얼 문서에서 표(Table) 내부 데이터를 오인식하여 잘못된 정보를 답변으로 생성하면, 고객 민원이 폭증해 CS 대란이 발생합니다. RAG 환각율을 3% 미만으로 억제할 전처리 기법이 있습니까?", "QA매니저 강혜원", "Quality Assurance Lead", 0.50)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "인프라 안정성 측면에서도 보완이 필요합니다. 트래픽 폭증이나 특정 LLM API 마비 시 자동으로 백업 모델로 Failover되는 전환 설계 및 SLA 99.9% 보장을 위한 무중단 가용성 방안이 박팀장님의 인프라 설계서에 포함되어야 서비스 지속이 가능합니다.", "SRE 한상민", "Site Reliability Engineer", 0.53)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "잠시만요! 저희 셀러들 몰래 50만원 이하의 자율 환불 처리를 AI가 임의로 집행했다가 만약 AI 오작동이나 환각으로 정산금이 엉뚱하게 지급되면, 그 금전적 피해와 고객 분쟁을 셀러가 그대로 뒤집어쓰게 됩니다. 정산 안전장치 없이는 셀러들의 집단 반발로 이커머스 입점이 올스톱될 것입니다.", "셀러대표 민경아", "Seller Representative", 0.56)
-    await asyncio.sleep(1.3)
-
-    yield _msg("agent_post", "민경아 대표님 말씀에 동의합니다. 만약 플랫폼 실수로 오환불된 비용을 플랫폼이 보상해 주어야 한다면, 저희 ROI 시뮬레이션 결과 비즈니스 마진이 완전히 깨집니다. 자율 환불 한도를 5만원 수준으로 대폭 축소해야 안전합니다.", "CFO 정우진", "Financial Director", 0.58)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "정우진 이사님, 한도를 5만원으로 낮추면 대형 이커머스 고객사들이 자율 처리를 쓸 이유가 없다고 도입을 포기할 겁니다. 자율 환불 50만원 선은 세일즈 성공의 절대적인 한계선입니다! 이를 낮추는 건 매출 포기 선언입니다.", "영업팀장 오세현", "B2B Sales Lead", 0.61)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "오세현 팀장님 실적 올리자고 우리 셀러들의 피 같은 대금을 위험에 노출시키라는 건가요? 한도가 50만원이든 5만원이든, 최종 승인 권한은 무조건 우리 셀러에게 남아있어야 합니다. 그렇지 않으면 입점 거부입니다!", "셀러대표 민경아", "Seller Representative", 0.63)
-    await asyncio.sleep(1.2)
-
-    # 4단계: 극적인 대안 도출 - HITL 및 Shadow Mode 도입 (63% - 85%)
-    yield _msg("graph_update", "Stage 4: Solutions Proposed (HITL Queue & Shadow Mode)", p=0.65, nodes=stage4_nodes, links=stage4_links)
-    await asyncio.sleep(0.4)
-
-    yield _msg("agent_post", "양측의 의견을 절충하기 위해, AI가 환불 초안과 RAG 매뉴얼 기반 판단 근거를 생성하되 최종 실행 전에 셀러나 상담원이 어드민 툴에서 '원클릭'으로 최종 승인을 하도록 만드는 'HITL(Human-in-the-Loop) 승인 대기 큐' 아키텍처를 제안합니다. 이 타협안은 어떻습니까?", "PM 김철수", "Product Manager", 0.67)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "의견을 이어서 구체화하자면, AI 판단 신뢰도가 85% 미만이거나 환불액이 50만 원을 초과할 경우 작동하는 'HITL 승인 대기 큐' UI를 제가 기획하겠습니다. AI가 RAG 근거와 요약본을 상담원 대시보드로 전달하고 상담원이 최종 확인 버튼을 누르게 설계하는 거죠.", "디자이너 정희채", "UI/UX Designer", 0.70)
-    await asyncio.sleep(1.2)
-
-    yield _msg("agent_post", "셀러가 최종 승인 버튼을 누르기 전에는 돈이 절대 빠져나가지 않는다면 대금 유출 보안성은 담보되겠네요. 하지만 매번 어드민 툴에 들어가서 복잡하게 확인해야 한다면 업무량이 너무 늘어납니다. 매일 수백 건을 어떻게 다 봅니까?", "셀러대표 민경아", "Seller Representative", 0.72)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "그 부분은 걱정 마세요! 셀러 전용 모바일 앱 및 알림톡을 연동해, AI가 판정한 RAG 근거 요약과 환불 대상 여부를 한눈에 시각화해 주고, 스마트폰에서 터치 한 번으로 3초 만에 승인할 수 있는 전용 간편 UI를 설계하겠습니다.", "디자이너 정희채", "UI/UX Designer", 0.74)
-    await asyncio.sleep(1.2)
-
-    yield _msg("agent_post", "스마트폰으로 3초 만에 RAG 근거를 보고 간편히 승인할 수 있다면, 대금 유출 걱정도 없고 업무 편의성도 오히려 늘어나겠네요. 이 안이라면 찬성합니다. 저희 셀러들도 동참하겠습니다.", "셀러대표 민경아", "Seller Representative", 0.76)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "아주 훌륭한 타협점입니다! 최종 결정 주체가 인간(셀러/상담원)이 되므로, AI 오작동에 대한 계약서 상 법률 책임 소재가 기존 임직원 과실 범위 내로 온전히 환원됩니다. 법적 리스크가 깔끔하게 해소되네요.", "법무팀장 최윤서", "Legal Counsel", 0.78)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "실제 배포 전 안정성 입증을 위해 추가 방안을 제안합니다. 9월 GA 출시 전에 '4주간의 Shadow Mode(섀도우 테스트)' 검증 단계를 로드맵에 못 박읍시다. 실제 결제 취소를 날리지는 않지만, 가상으로 백그라운드에서 AI의 응답 정확도와 PII 마스킹 속도를 실트래픽 로그 기반으로 검증하는 과도기입니다.", "아키텍트 박팀장", "Lead Architect", 0.81)
-    await asyncio.sleep(1.2)
-
-    yield _msg("agent_post", "좋습니다! 체감 속도를 보강하기 위해 한아름 엔지니어님 의견처럼 마스킹 처리 시 사용자에게 대기 UI를 연출합시다. '보안 필터 가동 중...' 및 '데이터 안심 마스킹 중'과 같은 시각적 로더 애니메이션을 아름답게 배치하면 UX 답답함을 완벽히 풀 수 있습니다.", "디자이너 정희채", "UI/UX Designer", 0.84)
-    await asyncio.sleep(1.2)
-
-    # 5단계: 합의 도달 및 최종 로드맵 확정 (85% - 100%)
-    yield _msg("graph_update", "Stage 5: Final Consensus & Roadmap Locked", p=0.86, nodes=final_nodes, links=final_links)
-    await asyncio.sleep(0.4)
-
-    yield _msg("agent_post", "섀도우 모드가 도입된다면 QA팀 입장에서도 매우 든든합니다! RAG의 HWP 표 파싱 성공률과 오류 이탈 통계를 4주 동안 실데이터 기반으로 모니터링하여, 프로덕션 배포 전 환각율 3% 미만을 무결하게 입증해 보이겠습니다.", "QA매니저 강혜원", "Quality Assurance Lead", 0.88)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "저 역시 Shadow Mode 기간 동안 실제로 데이터가 저장되지 않는지(Zero-Retention)와 50ms 미만 마스킹 레이턴시 실측 데이터를 볼 수 있어 다행입니다. 보안 감사 승인을 처리하겠습니다.", "보안감사관 이지훈", "Security Auditor", 0.90)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "섀도우 테스트 결과서와 PII 50ms 미만 지연 데이터가 완비되면 B2B 영업 시 기업 고객사와 금융권의 까다로운 보안 심의를 초고속으로 통과할 수 있어, 런칭 즉시 3곳 이상의 대형 이커머스 계약 클로징이 가능해집니다.", "영업팀장 오세현", "B2B Sales Lead", 0.92)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "섀도우 모드 기간을 활용해 실시간 모니터링 대시보드가 현장에 안착되면, 단순 반복 작업에 치이던 기존 CS 상담원들의 역할을 'AI 승인 검토자(Auditor)'로 자연스럽게 전환하고 직무 등급을 상향할 수 있습니다. CS 노조 및 사내 HR 갈등의 리스크를 완벽하게 해소할 수 있겠네요. 적극 찬성합니다.", "CS/HR 서진우", "CS & HR Manager", 0.94)
-    await asyncio.sleep(1.2)
-
-    yield _msg("agent_post", "서진우 매니저님의 HR 업스킬링 로드맵 교육 비용과 정희채 디자이너님의 HITL 모바일 위젯 개발 공수를 PRD 최종 딜리버리 항목에 정식 결합하고 이를 최종 예산안에 반영하겠습니다. 30% 운영 비용 ROI가 가시화되었네요.", "PM 김철수", "Product Manager", 0.96)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "인프라 쪽에서도 섀도우 모드 동안 다중 LLM Failover 시나리오와 SLA 99.9% 가용성 실측치를 도출해 장애 제로 인프라를 보증하겠습니다. 비용이 약간 늘더라도 ROI 달성에는 문제없게 튜닝하겠습니다.", "SRE 한상민", "Site Reliability Engineer", 0.98)
-    await asyncio.sleep(1.1)
-
-    yield _msg("agent_post", "팀 여러분, 치열한 논쟁 끝에 보안 마스킹, HITL 승인 대기 큐, 섀도우 모드 및 HR 업스킬링 계획을 모두 통합한 완벽한 안전 자율 실행 플랫폼의 PRD 표준을 수립했습니다. 2026년 9월 B2B 시장의 거대한 성공을 확신합니다!", "PM 김철수", "Product Manager", 0.99)
+    yield _msg("agent_post", "이번 Simply AI Agent는 기업용 레거시와 연동하여 주문 조회, 주문 취소, 50만원 이하 자율 환불 액션을 완수해야 합니다. 상담원 개입을 최소화하여 목표 TCR(업무완결율) 40% 이상을 기한 내 달성합시다.", "PM 김철수", "Product Manager", 0.07)
     await asyncio.sleep(0.8)
+
+    yield _msg("agent_post", "김철수 PM님, 현장을 전혀 모르는 안일한 발상입니다! AI가 TCR 40%를 달성하면 기존 CS 상담원들의 직무가 축소될 것이 뻔한데 CS 노조가 가만히 있겠습니까? 당장 내일 아침 본사 로비에서 구조조정 규탄 피켓 시위를 벌이겠다고 강경하게 경고해 왔습니다. 현장 합의 없는 도입은 전면 사보타주만 부를 뿐입니다!", "CS/HR 서진우", "CS & HR Manager", 0.09)
+    await asyncio.sleep(0.8)
+
+    yield _msg("agent_post", "서 매니저님, 지금 노조 시위 때문에 프로젝트를 지연시키자는 겁니까? 이번 6월 BMT(기술검증)를 통과하지 못하면 당장 연간 25억 규모의 대형 고객사 3곳과의 거래 딜이 즉시 무산됩니다. 비즈니스 생존보다 시위 방어가 더 중요합니까?", "영업팀장 오세현", "B2B Sales Lead", 0.11)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "오세현 팀장님, 단기 실적에 눈이 멀어 곪아 터질 폭탄을 방치하는 게 더 위험합니다! 현장 상담원들이 반발해서 RAG 입력 데이터 분류 태그를 엉망으로 입력하거나 고의로 피드백 점수를 흐려놓으면, 전체 AI 응답 정확도가 30% 이하로 곤두박질칠 겁니다. 그때 발생하는 유무형의 신뢰 손실은 25억이 아니라 250억으로도 못 메웁니다!", "CS/HR 서진우", "CS & HR Manager", 0.13)
+    await asyncio.sleep(0.8)
+
+    yield _msg("agent_post", "두 분 싸움보다 더 심각한 컴플라이언스 붕괴 위험이 있습니다. 외부 LLM API 통신 시 계좌번호와 주민번호 같은 개인식별정보(PII) 유출 위험은 치명적입니다. 50ms 이내 초고속 PII 마스킹 차단율 100%와 데이터 미저장(Zero-Retention) 조건이 실측 입증되지 않으면 금융감독원 보안성 심의에서 바로 반려되어 서비스 자체가 셧다운됩니다!", "보안감사관 이지훈", "Security Auditor", 0.16)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "이 감사관님, 50ms 이내 100% 차단은 물리적으로 불가능합니다! API 게이트웨이 전단에 다중 정규식 필터와 검출 모델을 동기식으로 끼워 넣으면 프록시 홉 오버헤드만 최소 600ms가 추가됩니다. 결과적으로 전체 E2E 레이턴시가 목표치인 1.5초를 훌쩍 넘어 2.5초에 달할 텐데, 화면이 렉 걸려 굳어버리는 서비스를 유저가 쓰겠습니까?", "아키텍트 박팀장", "Lead Architect", 0.18)
+    await asyncio.sleep(0.8)
+
+    # 2단계: 보안 감사 및 법률적 규제 검증의 압박 (20% - 45%)
+    yield _msg("graph_update", "Stage 2: Regulatory & Legal Constraints Addressed", p=0.20, nodes=stage2_nodes, links=stage2_links)
+    await asyncio.sleep(0.3)
+
+    yield _msg("agent_post", "맞습니다! 동기식 전처리 필터링이 연동되면 화면이 3초 이상 멈춰 서게 되고, 답답한 사용자들이 새로고침을 연타해서 API 커넥션이 폭증하고 웹소켓 서버가 크래시 날 겁니다. 속도가 무너진 보안은 사용자 이탈만 초래하는 UX 파괴일 뿐입니다!", "프론트 한아름", "Frontend Engineer", 0.22)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "한아름 엔지니어님, 화면 렉보다 금융 컴플라이언스 위반으로 인한 영업정지 처분과 과징금 10억원이 훨씬 치명적입니다! 보안 필터링은 타협 불가능한 절대 의무입니다. 기술적 어려움은 엔지니어링 리소스를 갈아 넣어서라도 50ms 기준을 지켜내야 할 영역입니다!", "보안감사관 이지훈", "Security Auditor", 0.25)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "보안뿐만 아니라 책임 귀속도 엉망입니다. AI 판단 오작동으로 50만원 이하 자율 환불이 잘못 집행되어 대금이 무단 유출되었을 때, 그 귀책사유와 민사상 배상 책임 기준이 PRD에 전혀 명시되어 있지 않습니다. 인간이 최종 통제하는 승인 대기 큐(HITL)가 차단 장치로 강제되지 않는다면, 법무팀은 배상 계약 조항에 절대 승인 도장을 찍을 수 없습니다!", "법무팀장 최윤서", "Legal Counsel", 0.28)
+    await asyncio.sleep(1.0)
+
+    yield _msg("agent_post", "재무 관점에서도 이 사업은 전면 보류해야 합니다. 박팀장님이 설계하신 PII 필터용 프록시 서버 이중화 구성과 고성능 전처리 LLM 호출 토큰 비용을 계산해보니 API 비용만 월 1,800만원이 찍힙니다. 기존 CS 인력 감축에 따른 운영비 절감액 1,100만원을 훌쩍 초과하는데, 배보다 배꼽이 더 큰 적자 프로젝트를 왜 승인해야 합니까?", "CFO 정우진", "Financial Director", 0.31)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "더 큰 문제는 데이터 정확도입니다. 고객사 매뉴얼의 HWP 한글 문서 내 '표(Table)' 구조를 파싱할 때 RAG 오인식률이 현재 18%에 달합니다. 18% 확률로 AI가 잘못된 환불 규정을 읽어서 50만원짜리 오환불을 남발하면 그 재정적 손실과 고객 불만을 어떻게 감당합니까?", "QA매니저 강혜원", "Quality Assurance Lead", 0.34)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "잠깐만요! RAG 오인식으로 잘못 환불된 돈을 입점 셀러인 우리더러 떠안으라는 소리입니까? 50만원 이하라고 셀러 확인도 없이 제멋대로 돈을 빼내 가다니요! 이런 정산 먹튀 플랫폼이라면 당장 저희 셀러 연합 450개 업체가 일제히 탈퇴하고 경쟁사로 이탈하겠습니다. 법적 소송도 불사할 것입니다!", "셀러대표 민경아", "Seller Representative", 0.37)
+    await asyncio.sleep(1.0)
+
+    yield _msg("agent_post", "민경아 대표님 지적이 백번 맞습니다. 잘못 환불된 대금을 플랫폼 재무 재원으로 보전해주기 시작하면 당사 재무 리스크가 걷잡을 수 없이 커집니다. 차라리 자율 환불 임계 한도를 50만원이 아니라 1만원 수준으로 대폭 축소하는 게 유일한 안전장치입니다.", "CFO 정우진", "Financial Director", 0.40)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "정 이사님! 한도를 1만원으로 낮추면 대형 바이어들이 'CS 자동화 효과가 전혀 없다'며 즉시 도입을 철회합니다. B2B 시장에서 50만원 임계값은 경쟁사 대비 독점적 우위를 확보하는 유일한 무기인데, 이걸 버리라는 건 영업 접고 사업 접으라는 소리입니다!", "영업팀장 오세현", "B2B Sales Lead", 0.43)
+    await asyncio.sleep(0.8)
+
+    # 3단계: 비용, QA 신뢰도, 정산 리스크의 충돌 (45% - 70%)
+    yield _msg("graph_update", "Stage 3: Financial Constraints, QA Reliability & Settlement Risks", p=0.45, nodes=stage3_nodes, links=stage3_links)
+    await asyncio.sleep(0.3)
+
+    yield _msg("agent_post", "오팀장님 실적 채우자고 우리 피 같은 정산금을 담보로 삼으라는 겁니까? 최종 정산 및 환불 집행 승인 권한은 법적 거래 주체인 셀러에게 최종 귀속되어야 합니다. 그렇지 않으면 단 하루도 MiroFish 플랫폼에 물건을 올리지 않겠습니다!", "셀러대표 민경아", "Seller Representative", 0.47)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "보안 필터 오버헤드, RAG 표 파싱 환각, 재무 적자, 그리고 셀러 이탈 리스크까지 첩첩산중이군요. 완벽한 교착 상태입니다. PM님, 이 상태로는 개발도, 배포도 불가능합니다. 특단의 돌파구가 필요합니다.", "아키텍트 박팀장", "Lead Architect", 0.50)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "모두 진정하십시오. 해결책이 있습니다. AI 신뢰도 판정 점수가 87% 미만이거나 환불 청구액이 10만원을 초과하는 거래는 AI가 자동 처리하지 않고, 실시간으로 분석 근거를 추출해 'HITL(Human-in-the-Loop) 승인 대기 큐'로 넘기는 절충안을 제안합니다. 최종 자율 한도는 50만원을 수호하되 안전 필터를 이중화하는 것입니다.", "PM 김철수", "Product Manager", 0.53)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "그 아이디어 좋습니다! AI가 수집한 증빙 자료와 HWP 표 분석 요약을 3초 만에 검토할 수 있는 원클릭 스마트폰 알림톡 위젯 UI를 개발하겠습니다. 셀러나 상담원이 클릭 한 번으로 최종 승인하게 만들면 검토 오버헤드를 최소화하면서 거래 권한을 보장할 수 있습니다.", "디자이너 정희채", "UI/UX Designer", 0.56)
+    await asyncio.sleep(1.0)
+
+    yield _msg("agent_post", "음, AI가 찾아낸 요약 보고서를 보고 우리가 직접 최종 터치를 해야만 돈이 나간다면 안심할 수 있겠네요. 3초 검토 방식이라면 장사 바쁜 와중에도 시간도 거의 안 뺏기고 납득할 만합니다. 찬성합니다.", "셀러대표 민경아", "Seller Representative", 0.59)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "최종 인출 주체를 AI가 아닌 인간(셀러)으로 격리하면 AI 오작동에 따른 플랫폼 면책 조항 계약이 성립됩니다. 법무팀에서도 이 조건이라면 배상 책임 리스크가 대부분 해소되므로 정식 승인을 낼 수 있습니다.", "법무팀장 최윤서", "Legal Counsel", 0.62)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "기술적 리스크를 완화하기 위해 본 가동 전 4주간 'Shadow Mode(섀도우 테스트)' 단계를 정식 개발 로드맵에 반영합시다. 실제 DB 정산 취소는 막아둔 채, 백그라운드에서 실데이터 트래픽을 흘려 PII 필터 레이턴시와 RAG 정확도 통계를 실측 튜닝하는 완충 기간을 갖는 겁니다.", "아키텍트 박팀장", "Lead Architect", 0.65)
+    await asyncio.sleep(1.0)
+
+    yield _msg("agent_post", "4주 섀도우 기간이 확보되면 화면 렉에 대한 UI 트릭을 적용하겠습니다. PII 필터 구동 시 화면에 '개인정보 안심 마스킹 적용 중...' 이라는 고급 Glassmorphism 스피너와 스켈레톤 애니메이션을 띄워 체감 대기 시간을 극적으로 단축시키고 사용자 이탈을 막겠습니다.", "프론트 한아름", "Frontend Engineer", 0.68)
+    await asyncio.sleep(0.9)
+
+    # 4단계: 극적인 타협안 도출 - HITL 및 Shadow Mode 도입 (70% - 90%)
+    yield _msg("graph_update", "Stage 4: Breakthrough Solutions (HITL Queue & Shadow Testing)", p=0.70, nodes=stage4_nodes, links=stage4_links)
+    await asyncio.sleep(0.3)
+
+    yield _msg("agent_post", "섀도우 모드의 4주 실측 데이터를 확보할 수 있다면, HWP 표 파싱 RAG 모델을 집중 미세조정(Fine-Tuning)하여 런칭 시점 환각율을 확실히 3% 미만으로 통제할 수 있습니다. QA 관점에서도 이 로드맵이라면 자신 있게 승인할 수 있습니다!", "QA매니저 강혜원", "Quality Assurance Lead", 0.72)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "보안실에서도 환영입니다. 4주간의 PII 50ms 필터링 보고서와 Zero-Retention 로깅 검증서를 미리 제출받아 보안성을 통제할 수 있다면, 정식 런칭 전에 금융권 ISMS-P 인증 승인을 사전 취득하는 스케줄이 가능해집니다.", "보안감사관 이지훈", "Security Auditor", 0.75)
+    await asyncio.sleep(1.0)
+
+    yield _msg("agent_post", "좋습니다! 4주간 검증된 신뢰도 통계와 ISMS-P 인증서를 세일즈 피치덱에 얹는다면, BMT 기술 심의는 통과한 것이나 다름없습니다. 대기업 3곳과의 25억 계약 클로징도 당장 3분기 내 달성해 내겠습니다!", "영업팀장 오세현", "B2B Sales Lead", 0.78)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "CS 조직에서도 이 대시보드를 검토하는 상담원들을 'AI 판정 신뢰성 감사관(Auditor)'으로 업스킬링하는 HR 로드맵을 연계하겠습니다. 단순 콜센터 상담사에서 AI 기술 통제관으로 직무가 격상되는 것이니, CS 노조의 구조조정 불안감과 반발을 원천 봉쇄할 수 있습니다!", "CS/HR 서진우", "CS & HR Manager", 0.81)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "직무 업스킬링 비용과 HITL 간편 위젯 UI 개발비를 예산에 공식 반영하더라도, 4주 섀도우 검증 및 25억 딜이 확보된다면 전체 프로젝트 ROI는 35% 이상 흑자로 전환됩니다. 재무 승인 안을 통과시키겠습니다!", "CFO 정우진", "Financial Director", 0.84)
+    await asyncio.sleep(1.0)
+
+    yield _msg("agent_post", "팀 여러분, 격렬한 공방과 고밀도 토론 끝에 마스킹 전처리, HITL 대기 큐, 4주 Shadow Mode, 그리고 CS 직무 업스킬링 로드맵을 모두 통합한 완벽한 B2B 자율 대행 PRD의 최종 합의(Consensus)를 이뤘습니다. 정식 출시를 향해 힘차게 전진합시다!", "PM 김철수", "Product Manager", 0.87)
+    await asyncio.sleep(0.9)
+
+    # 5단계: 합의 도달 및 최종 로드맵 확정 (90% - 100%)
+    yield _msg("graph_update", "Stage 5: High-Density Mesh Graph & Final consensus Completed", p=0.90, nodes=final_nodes, links=final_links)
+    await asyncio.sleep(0.3)
+
+    yield _msg("agent_post", "QA팀 관점에서도 Shadow Mode 실측 기간이 있다면 무결한 검증이 가능합니다! RAG의 HWP 표 파싱 정확도와 할루시네이션 분포 통계를 4주간 실데이터로 보강 튜닝하여, 런칭 전 환각율 3% 미만을 QA 보증하겠습니다.", "QA매니저 강혜원", "Quality Assurance Lead", 0.92)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "보안실에서도 대환영입니다. 4주 모의 가동 동안 PII 50ms 미만 전처리율과 Zero-Retention 데이터 미저장 로그 보고서를 감사하여 ISMS-P 인증 승인을 미리 발급해 두겠습니다.", "보안감사관 이지훈", "Security Auditor", 0.94)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "이 4주 검증 통계와 보안 감사 완료 보고서가 나오면 B2B 영업 BMT 기술 심의를 획기적으로 무력화해, 런칭 즉시 3곳 이상의 대기업 딜 클로징을 달성해 내겠습니다.", "영업팀장 오세현", "B2B Sales Lead", 0.96)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "현장 CS 상담원들도 이 대시보드를 검토자로 사용하는 'AI 판정 감사관(Auditor)'으로 점진적 역할 전환 및 내부 교육(Upskilling)을 연계하겠습니다. CS 노조의 구조조정 반발을 원천 봉쇄할 수 있는 훌륭한 HR 카드입니다.", "CS/HR 서진우", "CS & HR Manager", 0.98)
+    await asyncio.sleep(1.0)
+
+    yield _msg("agent_post", "서 매니저님의 교육 리소스비, 정희채 디자이너님의 모바일 HITL 위젯 개발 공수, 그리고 SRE의 로컬 failover Ollama 자원비를 모두 공식 PRD 예산안에 태워 승인하겠습니다. 비용 30%ROI가 무결하게 달성되겠네요.", "CFO 정우진", "Financial Director", 0.99)
+    await asyncio.sleep(0.9)
+
+    yield _msg("agent_post", "팀 여러분, 격렬한 공방과 고밀도 토론 끝에 마스킹 전처리, HITL 대기 큐, 4주 Shadow Mode 및 CS 직무 업스킬링 로드맵을 모두 통합한 완벽한 B2B 자율 대행 PRD의 최종 합의(Consensus)를 이뤘습니다. 정식 출시를 향해 나아갑시다!", "PM 김철수", "Product Manager", 0.99)
+    await asyncio.sleep(0.6)
     
-    yield _msg("system_log", "Synthesizing full multi-stakeholder debate interactions... Complete.", p=1.0)
-    await asyncio.sleep(0.4)
+    yield _msg("system_log", "Mock Agent Swarm consensus reached. Mesh graph populated with 77 nodes and 154 edges.", p=1.0)
+    await asyncio.sleep(0.3)
     yield _msg("simulation_complete", "All 12 stakeholder agents have reached a rigorous architectural and operational consensus.")
 
 @router.get("/stream")
 async def stream_simulation():
     """SSE stream yielding agent activities and graph updates."""
-    if settings.mirofish_mode != "live":
-        return StreamingResponse(_simulation_event_generator(mode="mock", reason="Validation mode is set to mock in settings"), media_type="text/event-stream")
+    current_mode = session_state.get("mode", "mock")
+    
+    if current_mode != "live":
+        return StreamingResponse(_simulation_event_generator(mode="mock", reason="Validation mode is set to mock"), media_type="text/event-stream")
+    
+    sim_id = session_state.get("simulation_id")
+    if not sim_id:
+        return StreamingResponse(_simulation_event_generator(mode="mock", reason="No active simulation session initialized. Call start simulation first."), media_type="text/event-stream")
+
+    # Live Mode Connection check and Polling with Graceful Fallback
+    import httpx
+    try:
+        # Check connection to MiroFish API engine first
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{settings.mirofish_base_url}/health")
+            resp.raise_for_status()
+    except Exception as ec:
+        logger.warning(f"MiroFish Engine is unreachable ({ec}). Gracefully falling back to 12-agent enterprise Mock stream.")
+        return StreamingResponse(_simulation_event_generator(mode="live_fallback", reason=f"Engine Unreachable: {str(ec)}"), media_type="text/event-stream")
+
+    async def _mirofish_event_generator():
+        import json
+        yield f'data: {json.dumps({"type": "mode_check", "mode": "live"})}\n\n'
     
     sim_id = session_state.get("simulation_id")
     if not sim_id:
