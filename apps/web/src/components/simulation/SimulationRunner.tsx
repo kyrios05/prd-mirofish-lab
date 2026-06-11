@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import * as d3 from 'd3';
+import { forceX, forceY, forceCollide } from 'd3-force';
 
 interface Props {
   performAction: (actionId: string, payload?: any) => Promise<void>;
@@ -223,39 +223,42 @@ export function SimulationRunner({ performAction }: Props) {
   useEffect(() => {
     if (fgRef.current) {
       const fg = fgRef.current;
-      
-      // 1. Center force 제거 (노드들이 한 군데 뭉치는 주범)
-      fg.d3Force('center', null);
+      try {
+        // 1. Center force 제거 (노드들이 한 군데 뭉치는 주범)
+        fg.d3Force('center', null);
 
-      // 2. Link force의 강도와 거리 조율
-      fg.d3Force('link')
-        ?.distance(35)
-        ?.strength(0.4);
+        // 2. Link force의 강도와 거리 조율
+        fg.d3Force('link')
+          ?.distance(35)
+          ?.strength(0.4);
 
-      // 3. Repulsion (서로 밀어내는 힘) 강하게 적용
-      fg.d3Force('charge')?.strength(-160);
+        // 3. Repulsion (서로 밀어내는 힘) 강하게 적용
+        fg.d3Force('charge')?.strength(-160);
 
-      // 4. Group 기반 중심 좌표 유도 force
-      const centerX = dimensions.width / 2;
-      const centerY = dimensions.height / 2;
-      const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
+        // 4. Group 기반 중심 좌표 유도 force
+        const centerX = dimensions.width / 2;
+        const centerY = dimensions.height / 2;
+        const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
 
-      fg.d3Force('x', d3.forceX().x((d: any) => {
-        const group = d.group || 0;
-        const angle = (group / 7) * 2 * Math.PI;
-        return centerX + radius * Math.cos(angle);
-      }).strength(0.35));
+        fg.d3Force('x', forceX().x((d: any) => {
+          const group = d.group || 0;
+          const angle = (group / 7) * 2 * Math.PI;
+          return centerX + radius * Math.cos(angle);
+        }).strength(0.35));
 
-      fg.d3Force('y', d3.forceY().y((d: any) => {
-        const group = d.group || 0;
-        const angle = (group / 7) * 2 * Math.PI;
-        return centerY + radius * Math.sin(angle);
-      }).strength(0.35));
+        fg.d3Force('y', forceY().y((d: any) => {
+          const group = d.group || 0;
+          const angle = (group / 7) * 2 * Math.PI;
+          return centerY + radius * Math.sin(angle);
+        }).strength(0.35));
 
-      // 5. Collision 힘 (노드가 겹치지 않게)
-      fg.d3Force('collide', d3.forceCollide().radius(20));
+        // 5. Collision 힘 (노드가 겹치지 않게)
+        fg.d3Force('collide', forceCollide().radius(20));
 
-      fg.d3ReheatSimulation();
+        fg.d3ReheatSimulation();
+      } catch (err) {
+        console.error("Failed to configure D3 force layout clustering:", err);
+      }
     }
   }, [fgRef, dimensions, graphData]);
 
