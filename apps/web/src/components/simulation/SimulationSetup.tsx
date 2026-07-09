@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Container, Grid, Card, TextInput, Textarea, Button, Text, Group, Box, Center, ActionIcon, Title, Paper, Badge, Stack, Progress } from '@mantine/core';
 
 interface Stakeholder {
   name: string;
@@ -19,7 +20,12 @@ export function SimulationSetup({ performAction, prd, liveMode }: Props) {
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [step, setStep] = useState<'initial' | 'config'>('initial');
 
-  // Initialize from PRD if already present
+  const [analyzeProgress, setAnalyzeProgress] = useState<number | null>(null);
+  const [analyzeMsg, setAnalyzeMsg] = useState('');
+
+  const [startProgress, setStartProgress] = useState<number | null>(null);
+  const [startMsg, setStartMsg] = useState('');
+
   useEffect(() => {
     if (prd?.validation?.stakeholder_personas && prd.validation.stakeholder_personas.length > 0) {
       setStakeholders(prd.validation.stakeholder_personas);
@@ -27,34 +33,70 @@ export function SimulationSetup({ performAction, prd, liveMode }: Props) {
     }
   }, [prd]);
 
-  const handleAnalyze = async () => {
-    if (!prd) {
-      console.warn("PRD draft is missing, sending empty object");
-    }
+  const handleAnalyze = () => {
     setAnalyzing(true);
-    try {
-      const response = await fetch('/api/simulation/propose-stakeholders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(prd || {}),
-      });
-      const data = await response.json();
-      if (data.status === 'success') {
-        setStakeholders(data.stakeholders);
-        setStep('config');
+    setAnalyzeProgress(0);
+    setAnalyzeMsg('🔍 PRD 요구사항 도메인 추출 분석 중...');
+    
+    let current = 0;
+    const interval = setInterval(async () => {
+      current += 100 / 30; // 3초에 100% 도달
+      if (current >= 100) {
+        clearInterval(interval);
+        setAnalyzeProgress(null);
+        setAnalyzeMsg('');
+        
+        try {
+          const response = await fetch('/api/simulation/propose-stakeholders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...(prd || {}), live: liveMode }),
+          });
+          const data = await response.json();
+          if (data.status === 'success') {
+            setStakeholders(data.stakeholders);
+            setStep('config');
+          }
+        } catch (error) {
+          console.error('Failed to propose stakeholders:', error);
+        } finally {
+          setAnalyzing(false);
+        }
+      } else {
+        setAnalyzeProgress(Math.min(current, 99));
+        if (current > 70) {
+          setAnalyzeMsg('📑 30인 전문가 풀 매칭 및 페르소나 데이터 매핑 중...');
+        } else if (current > 35) {
+          setAnalyzeMsg('🤝 이해관계자 리스크 모델 및 피치덱 가이드라인 계산 중...');
+        }
       }
-    } catch (error) {
-      console.error('Failed to propose stakeholders:', error);
-    } finally {
-      setAnalyzing(false);
-    }
+    }, 100);
   };
 
-  const handleStart = async () => {
+  const handleStart = () => {
     setLoading(true);
-    // Send the possibly EDITED stakeholders back to the backend
-    await performAction("start_simulation", { stakeholder_personas: stakeholders, live: liveMode });
-    setLoading(false);
+    setStartProgress(0);
+    setStartMsg('🌐 실시간 지식 그래프 네트워크 엔진 마운트 중...');
+    
+    let current = 0;
+    const interval = setInterval(async () => {
+      current += 100 / 30; // 3초에 100% 도달
+      if (current >= 100) {
+        clearInterval(interval);
+        setStartProgress(null);
+        setStartMsg('');
+        
+        await performAction("start_simulation", { stakeholder_personas: stakeholders, live: liveMode });
+        setLoading(false);
+      } else {
+        setStartProgress(Math.min(current, 99));
+        if (current > 70) {
+          setStartMsg('⚖️ 30인 다자간 이해관계 합의 에이전트 초기 상태 검증 중...');
+        } else if (current > 40) {
+          setStartMsg('📡 에이전트 브로드캐스트 라우터 및 RAG 인덱서 초기화 중...');
+        }
+      }
+    }, 100);
   };
 
   const updateStakeholder = (index: number, field: keyof Stakeholder, value: any) => {
@@ -78,123 +120,202 @@ export function SimulationSetup({ performAction, prd, liveMode }: Props) {
 
   if (step === 'initial') {
     return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', background: 'radial-gradient(circle at center, #1e293b 0%, #020617 100%)' }}>
-        <div style={{ maxWidth: '800px', width: '90%', background: 'rgba(30, 41, 59, 0.5)', padding: '3.5rem', borderRadius: '24px', backdropFilter: 'blur(20px)', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', border: '1px solid rgba(255, 255, 255, 0.1)', textAlign: 'center' }}>
-          <div style={{ display: 'inline-block', padding: '0.5rem 1rem', background: '#3b82f620', color: '#3b82f6', borderRadius: '12px', fontSize: '0.875rem', fontWeight: 600, marginBottom: '1.5rem' }}>Simulation Step 01</div>
-          <h3 style={{ marginTop: 0, marginBottom: '1.5rem', color: '#f8fafc', fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.05em' }}>Reality Seeds</h3>
-          <p style={{ color: '#94a3b8', marginBottom: '3rem', fontSize: '1.125rem', lineHeight: 1.8, maxWidth: '600px', margin: '0 auto 3rem auto' }}>
+      <Center style={{ flex: 1, padding: '2rem', background: 'radial-gradient(circle at center, #111827 0%, #090d16 100%)' }}>
+        <Paper
+          shadow="xl"
+          p="xl"
+          radius="lg"
+          style={{
+            maxWidth: '650px',
+            width: '100%',
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+            backdropFilter: 'blur(20px)',
+            textAlign: 'center'
+          }}
+        >
+          <Badge color="indigo" variant="light" size="lg" mb="md">
+            Simulation Step 01
+          </Badge>
+          <Title order={2} style={{ marginBottom: '1rem', color: 'var(--text-primary)', fontSize: '2.2rem', fontFamily: 'Outfit, sans-serif' }}>
+            Reality Seeds
+          </Title>
+          <Text size="sm" c="dimmed" mb="xl" style={{ lineHeight: 1.6 }}>
             To stress-test your PRD, we first need to identify the key stakeholders who will participate in the simulation. These agents will use their unique personas to challenge your requirements.
-          </p>
+          </Text>
 
-          <button 
+          <Button 
+            size="lg"
+            variant="gradient"
+            gradient={{ from: 'indigo', to: 'cyan' }}
             onClick={handleAnalyze}
-            disabled={analyzing}
-            style={{ 
-              width: '100%', 
-              maxWidth: '400px',
-              padding: '1.25rem', 
-              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '12px', 
-              fontSize: '1.125rem', 
-              fontWeight: 700, 
-              cursor: analyzing ? 'not-allowed' : 'pointer', 
-              opacity: analyzing ? 0.7 : 1, 
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              boxShadow: '0 10px 15px -3px rgba(37, 99, 235, 0.3)'
-            }}
+            loading={analyzing && analyzeProgress === null}
+            disabled={analyzeProgress !== null}
+            fullWidth
           >
-            {analyzing ? 'Analyzing PRD...' : '🔍 Identify Stakeholders'}
-          </button>
-        </div>
-      </div>
+            {analyzing ? 'Analyzing PRD...' : 'Identify Stakeholders'}
+          </Button>
+
+          {analyzeProgress !== null && (
+            <Box mt="md" w="100%">
+              <Progress value={analyzeProgress} animated color="indigo" size="md" />
+              <Text size="xs" c="dimmed" mt={8} ta="center">
+                {analyzeMsg} ({Math.round(analyzeProgress)}%)
+              </Text>
+            </Box>
+          )}
+        </Paper>
+      </Center>
     );
   }
 
   return (
-    <div style={{ flex: 1, padding: '3rem', overflowY: 'auto', background: '#020617' }}>
-      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '3rem' }}>
-          <div>
-            <h3 style={{ margin: 0, color: '#f8fafc', fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.05em' }}>Persona Configuration</h3>
-            <p style={{ color: '#94a3b8', marginTop: '0.5rem', fontSize: '1.125rem' }}>
+    <Box style={{ flex: 1, padding: '24px', overflowY: 'auto', background: '#090d16', width: '100%' }}>
+      <Container size="xl">
+        <Group justify="space-between" align="flex-end" mb="xl" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '16px' }}>
+          <Box>
+            <Title order={2} style={{ color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>Persona Configuration</Title>
+            <Text size="sm" c="dimmed" mt={4}>
               Review and refine the stakeholders who will stress-test your product.
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <button onClick={addStakeholder} style={{ padding: '0.75rem 1.5rem', background: 'rgba(255, 255, 255, 0.05)', color: '#cbd5e1', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '10px', fontWeight: 600, cursor: 'pointer' }}>+ Add Stakeholder</button>
-            <button 
-              onClick={handleStart} 
-              disabled={loading}
-              style={{ 
-                padding: '0.75rem 2rem', 
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
-                color: 'white', 
-                border: 'none', 
-                borderRadius: '10px', 
-                fontWeight: 700, 
-                fontSize: '1rem',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                boxShadow: '0 10px 15px -3px rgba(16, 185, 129, 0.3)'
-              }}
-            >
-              {loading ? 'Initializing Engine...' : '🚀 Start Simulation'}
-            </button>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
-          {stakeholders.map((s, idx) => (
-            <div key={idx} style={{ background: 'rgba(30, 41, 59, 0.6)', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.1)', padding: '1.5rem', position: 'relative' }}>
-              <button 
-                onClick={() => removeStakeholder(idx)}
-                style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '1.2rem' }}
+            </Text>
+          </Box>
+          <Stack gap="xs" align="flex-end">
+            <Group gap="sm">
+              <Button variant="outline" color="gray" onClick={addStakeholder} disabled={startProgress !== null}>
+                + Add Stakeholder
+              </Button>
+              <Button 
+                variant="gradient"
+                gradient={{ from: 'teal', to: 'lime' }}
+                onClick={handleStart} 
+                loading={loading && startProgress === null}
+                disabled={startProgress !== null}
               >
-                &times;
-              </button>
-              
-              <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', alignItems: 'center' }}>
-                <div style={{ width: '48px', height: '48px', background: '#3b82f620', color: '#3b82f6', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>
-                  {s.role.toLowerCase().includes('pm') ? '🧑‍💼' : s.role.toLowerCase().includes('dev') ? '👨‍💻' : '👤'}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <input 
-                    value={s.name} 
-                    onChange={(e) => updateStakeholder(idx, 'name', e.target.value)}
-                    style={{ background: 'none', border: 'none', color: '#f8fafc', fontSize: '1.25rem', fontWeight: 700, width: '100%', marginBottom: '0.25rem' }}
-                  />
-                  <input 
-                    value={s.role} 
-                    onChange={(e) => updateStakeholder(idx, 'role', e.target.value)}
-                    style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '0.875rem', fontWeight: 600, width: '100%' }}
-                  />
-                </div>
-              </div>
+                Start Simulation
+              </Button>
+            </Group>
+            {startProgress !== null && (
+              <Box w={300}>
+                <Progress value={startProgress} animated color="teal" size="sm" />
+                <Text size="10px" c="dimmed" mt={4} ta="right">
+                  {startMsg} ({Math.round(startProgress)}%)
+                </Text>
+              </Box>
+            )}
+          </Stack>
+        </Group>
 
-              <div style={{ marginBottom: '1.25rem' }}>
-                <label style={{ display: 'block', color: '#64748b', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '0.05em' }}>Review Angle</label>
-                <textarea 
-                  value={s.review_angle || ''} 
-                  onChange={(e) => updateStakeholder(idx, 'review_angle', e.target.value)}
-                  style={{ width: '100%', background: 'rgba(15, 23, 42, 0.5)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '8px', padding: '0.75rem', color: '#cbd5e1', fontSize: '0.9rem', lineHeight: 1.5, resize: 'none', height: '80px' }}
-                  placeholder="PRD에서 어떤 점을 검증하는지 기재합니다."
-                />
-              </div>
+        <Grid>
+          {stakeholders.map((s, idx) => (
+            <Grid.Col key={idx} span={{ base: 12, md: 6, lg: 4 }}>
+              <Card
+                shadow="xl"
+                p="md"
+                withBorder
+                style={{
+                  background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%)',
+                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.4)',
+                  backdropFilter: 'blur(8px)',
+                  position: 'relative',
+                  overflow: 'visible'
+                }}
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => removeStakeholder(idx)}
+                  style={{ position: 'absolute', top: 12, right: 12 }}
+                >
+                  &times;
+                </ActionIcon>
+                
+                <Group gap="md" mb="md">
+                  <Center style={{ width: 44, height: 44, borderRadius: 8, background: 'rgba(99, 102, 241, 0.1)', color: '#818cf8', fontWeight: 700, fontSize: '0.85rem' }}>
+                    {s.role ? s.role.slice(0, 2).toUpperCase() : 'ST'}
+                  </Center>
+                  <Box style={{ flex: 1 }}>
+                    <TextInput 
+                      value={s.name} 
+                      onChange={(e) => updateStakeholder(idx, 'name', e.target.value)}
+                      variant="unstyled"
+                      styles={{
+                        input: {
+                          color: 'var(--text-primary)',
+                          fontWeight: 700,
+                          fontSize: '1.1rem',
+                          height: 'auto',
+                          padding: 0
+                        }
+                      }}
+                    />
+                    <TextInput 
+                      value={s.role} 
+                      onChange={(e) => updateStakeholder(idx, 'role', e.target.value)}
+                      variant="unstyled"
+                      styles={{
+                        input: {
+                          color: 'var(--mantine-color-indigo-4)',
+                          fontWeight: 600,
+                          fontSize: '0.8rem',
+                          height: 'auto',
+                          padding: 0
+                        }
+                      }}
+                    />
+                  </Box>
+                </Group>
 
-              <div>
-                <label style={{ display: 'block', color: '#64748b', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '0.05em' }}>Likely Objections (Enter-separated)</label>
-                <textarea 
-                  value={s.likely_objections ? s.likely_objections.join('\n') : ''} 
-                  onChange={(e) => updateStakeholder(idx, 'likely_objections', e.target.value.split('\n'))}
-                  style={{ width: '100%', background: 'rgba(15, 23, 42, 0.5)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '8px', padding: '0.75rem', color: '#cbd5e1', fontSize: '0.9rem', lineHeight: 1.5, resize: 'none', height: '80px' }}
-                  placeholder="예상되는 이의나 지적 사항을 한 줄에 하나씩 입력하세요."
-                />
-              </div>
-            </div>
+                <Stack gap="sm">
+                  <Box>
+                    <Text size="10px" fw={700} c="dimmed" mb={4} style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Review Angle
+                    </Text>
+                    <Textarea 
+                      value={s.review_angle || ''} 
+                      onChange={(e) => updateStakeholder(idx, 'review_angle', e.target.value)}
+                      autosize
+                      minRows={2}
+                      maxRows={4}
+                      placeholder="PRD에서 어떤 점을 검증하는지 기재합니다."
+                      styles={{
+                        input: {
+                          background: 'rgba(0, 0, 0, 0.2)',
+                          border: '1px solid rgba(255, 255, 255, 0.05)',
+                          color: '#cbd5e1',
+                          fontSize: '0.85rem'
+                        }
+                      }}
+                    />
+                  </Box>
+
+                  <Box>
+                    <Text size="10px" fw={700} c="dimmed" mb={4} style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Likely Objections (Enter-separated)
+                    </Text>
+                    <Textarea 
+                      value={s.likely_objections ? s.likely_objections.join('\n') : ''} 
+                      onChange={(e) => updateStakeholder(idx, 'likely_objections', e.target.value.split('\n'))}
+                      autosize
+                      minRows={2}
+                      maxRows={4}
+                      placeholder="예상되는 이의나 지적 사항을 입력하세요."
+                      styles={{
+                        input: {
+                          background: 'rgba(0, 0, 0, 0.2)',
+                          border: '1px solid rgba(255, 255, 255, 0.05)',
+                          color: '#cbd5e1',
+                          fontSize: '0.85rem'
+                        }
+                      }}
+                    />
+                  </Box>
+                </Stack>
+              </Card>
+            </Grid.Col>
           ))}
-        </div>
-      </div>
-    </div>
+        </Grid>
+      </Container>
+    </Box>
   );
 }

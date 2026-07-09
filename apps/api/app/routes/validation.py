@@ -54,6 +54,7 @@ class ValidationRequest(BaseModel):
 
     project_id: str
     prd: dict  # raw dict — schema-validated before Pydantic construction
+    live: bool = False
 
 
 class SchemaErrorItem(BaseModel):
@@ -179,6 +180,10 @@ async def run_validation(body: ValidationRequest) -> ValidationResponse:
 
     # Step 4 (T10): Run via MiroFishClient (mock or live depending on config)
     client = make_mirofish_client()
+    if body.live:
+        client.mode = "live"
+    else:
+        client.mode = "mock"
     result: ValidationResult | None = await client.run_validation(spec)
 
     # Collect mode/job metadata for the response

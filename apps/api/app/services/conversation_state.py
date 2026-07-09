@@ -53,6 +53,11 @@ class ConversationPhase(str, Enum):
     REVIEWING = "reviewing"
     READY_FOR_VALIDATION = "ready_for_validation"
     VALIDATED = "validated"
+    SIMULATION_SETUP = "simulation_setup"
+    SIMULATING = "simulating"
+    SIMULATION_RESULT = "simulation_result"
+    REPORT_GENERATING = "report_generating"
+    REPORT_COMPLETE = "report_complete"
 
 
 # ---------------------------------------------------------------------------
@@ -74,15 +79,37 @@ PHASE_AVAILABLE_ACTIONS: dict[str, list[str]] = {
         "edit_section",
         "restart_section",
         "save_checkpoint",
+        "run_simulation",
     ],
     ConversationPhase.READY_FOR_VALIDATION: [
         "run_validation",
         "go_back",
+        "run_simulation",
     ],
     ConversationPhase.VALIDATED: [
         "view_result",
         "edit_section",
         "restart_section",
+        "run_simulation",
+    ],
+    ConversationPhase.SIMULATION_SETUP: [
+        "start_simulation",
+        "go_back",
+    ],
+    ConversationPhase.SIMULATING: [
+        "stop_simulation",
+    ],
+    ConversationPhase.SIMULATION_RESULT: [
+        "generate_report",
+        "go_back",
+    ],
+    ConversationPhase.REPORT_GENERATING: [
+        "generate_report_complete",
+    ],
+    ConversationPhase.REPORT_COMPLETE: [
+        "download_report",
+        "rewrite_prd",
+        "go_back",
     ],
 }
 
@@ -176,6 +203,14 @@ _ALLOWED_TRANSITIONS: set[tuple[str, str]] = {
     (ConversationPhase.REVIEWING,            ConversationPhase.READY_FOR_VALIDATION),
     (ConversationPhase.READY_FOR_VALIDATION, ConversationPhase.VALIDATED),
     (ConversationPhase.VALIDATED,            ConversationPhase.REVIEWING),
+    (ConversationPhase.INTERVIEWING,         ConversationPhase.READY_FOR_VALIDATION),
+    (ConversationPhase.READY_FOR_VALIDATION, ConversationPhase.SIMULATION_SETUP),
+    (ConversationPhase.VALIDATED,            ConversationPhase.SIMULATION_SETUP),
+    (ConversationPhase.SIMULATION_SETUP,     ConversationPhase.SIMULATING),
+    (ConversationPhase.SIMULATING,           ConversationPhase.SIMULATION_RESULT),
+    (ConversationPhase.SIMULATION_RESULT,    ConversationPhase.REPORT_GENERATING),
+    (ConversationPhase.REPORT_GENERATING,    ConversationPhase.REPORT_COMPLETE),
+    (ConversationPhase.REPORT_COMPLETE,      ConversationPhase.INTERVIEWING),
 }
 
 
@@ -303,6 +338,21 @@ class ConversationStateMachine:
             success = self.transition(
                 ConversationPhase.REVIEWING,
                 trigger="auto_advance",
+                completeness=completeness,
+                phase_history=phase_history,
+            )
+            # After moving to REVIEWING, check if we can immediately move to READY_FOR_VALIDATION
+            if success:
+                self.auto_advance(completeness, phase_history)
+            return self.current_phase if success else None
+
+        if (
+            self.current_phase == ConversationPhase.REVIEWING
+            and completeness.progress >= 1.0
+        ):
+            success = self.transition(
+                ConversationPhase.READY_FOR_VALIDATION,
+                trigger="auto_advance_complete",
                 completeness=completeness,
                 phase_history=phase_history,
             )

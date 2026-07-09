@@ -132,6 +132,13 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _unwrap_data(resp: dict[str, Any]) -> dict[str, Any]:
+    """Helper to unwrap 'data' field from envelope-style JSON responses."""
+    if isinstance(resp, dict) and "data" in resp and isinstance(resp["data"], dict):
+        return resp["data"]
+    return resp
+
+
 # ---------------------------------------------------------------------------
 # Response mapper
 # ---------------------------------------------------------------------------
@@ -156,6 +163,7 @@ def _map_mirofish_response(
     Falls back to empty lists for missing array fields.
     Always produces a non-empty summary.
     """
+    raw = _unwrap_data(raw)
     if not isinstance(raw, dict):
         logger.warning("MiroFish report is not a dict (got %s); mapper returning None", type(raw))
         return None
@@ -337,8 +345,96 @@ class MiroFishAdapter:
         raise last_exc  # type: ignore[misc]
 
     # -----------------------------------------------------------------------
-    # Step 1 + 2 + prepare-poll: submit_validation
+    # Step 0 + 1 + 2 + prepare-poll: submit_validation
     # -----------------------------------------------------------------------
+
+    async def _ensure_project_exists(self, client: httpx.AsyncClient, spec: SimulationSpec) -> None:
+        """
+        Check if the project exists in MiroFish-Offline engine.
+        If it doesn't, perform ontology generation and graph build steps.
+        """
+        import io
+        project_id = spec.prd_summary.get("project_id") or spec.spec_id
+        
+        logger.info("Checking if project %s exists on MiroFish-Offline engine...", project_id)
+        project_exists = False
+        try:
+            resp = await self._get(client, f"/api/graph/project/{project_id}")
+            resp_data = _unwrap_data(resp)
+            if resp.get("success") or resp_data.get("project_id"):
+                project_exists = True
+                returned_project_id = resp_data.get("project_id") or project_id
+                actual_graph_id = resp_data.get("graph_id")
+                if actual_graph_id:
+                    spec.prd_summary["graph_id"] = actual_graph_id
+                spec.prd_summary["project_id"] = returned_project_id
+                logger.info("Project %s already exists with graph_id %s.", project_id, actual_graph_id)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.info("Project %s not found. Initiating auto-setup...", project_id)
+            else:
+                logger.warning("Project lookup returned status %d. Attempting auto-setup anyway.", e.response.status_code)
+        except Exception as e:
+            logger.warning("Failed to lookup project: %s. Attempting auto-setup anyway.", e)
+            
+        if not project_exists:
+            # Step 1: Upload files and generate ontology
+            files = {
+                'files': ('prd.md', io.BytesIO(spec.prd_markdown.encode('utf-8')), 'text/markdown')
+            }
+            data = {
+                'simulation_requirement': spec.validation_config.simulation_requirement or spec.prd_summary.get("one_liner", "PRD Validation"),
+                'project_name': spec.prd_summary.get("name", "Unnamed Project"),
+                'additional_context': spec.prd_summary.get("one_liner", "")
+            }
+            
+            headers = {}
+            if self.api_key:
+                headers["X-API-Key"] = self.api_key
+                headers["Authorization"] = f"Bearer {self.api_key}"
+                
+            url = f"{self.base_url}/api/graph/ontology/generate"
+            logger.info("POST to %s for ontology generation", url)
+            
+            resp = await client.post(url, data=data, files=files, headers=headers, timeout=self.timeout)
+            resp.raise_for_status()
+            onto_resp = resp.json()
+            
+            returned_project_id = onto_resp["data"]["project_id"]
+            spec.prd_summary["project_id"] = returned_project_id
+            logger.info("Created new project on MiroFish. Project ID: %s", returned_project_id)
+            
+            # Step 2: Build graph
+            logger.info("Building graph for new project %s...", returned_project_id)
+            build_resp = await self._post(
+                client, "/api/graph/build", {"project_id": returned_project_id}
+            )
+            task_id = build_resp["data"]["task_id"]
+            
+            # Step 3: Wait for task
+            max_attempts = self.max_polling_attempts
+            logger.info("Polling graph build task %s...", task_id)
+            for _ in range(max_attempts):
+                task_resp = await self._get(client, f"/api/graph/task/{task_id}")
+                task_data = task_resp["data"]
+                status = task_data.get("status")
+                if status == "completed":
+                    logger.info("Graph build completed successfully.")
+                    break
+                if status == "failed":
+                    raise Exception(f"MiroFish graph build task {task_id} failed: {task_data.get('error')}")
+                await asyncio.sleep(self.polling_interval)
+            else:
+                raise Exception(f"MiroFish graph build task {task_id} timed out.")
+
+            # Step 4: Fetch project details to get actual graph_id
+            logger.info("Fetching project details for %s to get graph_id...", returned_project_id)
+            proj_resp = await self._get(client, f"/api/graph/project/{returned_project_id}")
+            proj_data = _unwrap_data(proj_resp)
+            actual_graph_id = proj_data.get("graph_id")
+            if actual_graph_id:
+                spec.prd_summary["graph_id"] = actual_graph_id
+                logger.info("Successfully fetched actual graph_id: %s", actual_graph_id)
 
     async def submit_validation(self, spec: SimulationSpec) -> MiroFishJob:
         """
@@ -348,6 +444,7 @@ class MiroFishAdapter:
 
         Steps
         -----
+        0. Ensure project and graph exist in engine
         1. POST /api/simulation/create
         2. POST /api/simulation/prepare
         3. Poll POST /api/simulation/prepare/status until status == "ready"
@@ -357,16 +454,25 @@ class MiroFishAdapter:
         logger.info("[job=%s] Starting submit_validation", job.job_id)
 
         async with httpx.AsyncClient() as client:
+            # ── Step 0: Ensure project and graph exist ──────────────────────
+            try:
+                await self._ensure_project_exists(client, spec)
+            except Exception as exc:
+                job._update(status=MiroFishJobStatus.FAILED, error=f"project setup failed: {exc}")
+                logger.error("[job=%s] project setup step failed: %s", job.job_id, exc)
+                return job
+
             # ── Step 1: create ──────────────────────────────────────────────
             try:
                 create_payload = _build_create_payload(spec)
                 create_resp = await self._post(
                     client, "/api/simulation/create", create_payload
                 )
+                create_data = _unwrap_data(create_resp)
                 simulation_id = (
-                    create_resp.get("simulation_id")
-                    or create_resp.get("id")
-                    or create_resp.get("simulationId")
+                    create_data.get("simulation_id")
+                    or create_data.get("id")
+                    or create_data.get("simulationId")
                 )
                 if not simulation_id:
                     raise ValueError(
@@ -387,10 +493,11 @@ class MiroFishAdapter:
                     "/api/simulation/prepare",
                     {"simulation_id": job.simulation_id},
                 )
+                prepare_data = _unwrap_data(prepare_resp)
                 task_id = (
-                    prepare_resp.get("task_id")
-                    or prepare_resp.get("taskId")
-                    or prepare_resp.get("id")
+                    prepare_data.get("task_id")
+                    or prepare_data.get("taskId")
+                    or prepare_data.get("id")
                 )
                 if task_id:
                     job.task_id = str(task_id)
@@ -416,10 +523,14 @@ class MiroFishAdapter:
 
             # ── Step 4: run ─────────────────────────────────────────────────
             try:
+                run_payload = {
+                    "simulation_id": job.simulation_id,
+                    "platform": "parallel",
+                }
                 await self._post(
                     client,
-                    f"/api/simulation/{job.simulation_id}/run",
-                    {},
+                    "/api/simulation/start",
+                    run_payload,
                 )
                 job._update(status=MiroFishJobStatus.RUNNING, progress=0.5)
                 logger.info("[job=%s] Simulation run started", job.job_id)
@@ -450,10 +561,11 @@ class MiroFishAdapter:
                 status_resp = await self._post(
                     client, "/api/simulation/prepare/status", payload
                 )
+                status_data = _unwrap_data(status_resp)
                 status_val = str(
-                    status_resp.get("status") or status_resp.get("state") or ""
+                    status_data.get("status") or status_data.get("state") or ""
                 ).lower()
-                raw_progress = status_resp.get("progress")
+                raw_progress = status_data.get("progress")
                 if isinstance(raw_progress, (int, float)):
                     job._update(progress=min(0.2 + float(raw_progress) * 0.3, 0.49))
 
@@ -466,7 +578,7 @@ class MiroFishAdapter:
                     job._update(status=MiroFishJobStatus.READY, progress=0.5)
                     return job
                 if status_val in ("failed", "error"):
-                    err = status_resp.get("error") or status_resp.get("message") or "prepare failed"
+                    err = status_data.get("error") or status_data.get("message") or "prepare failed"
                     job._update(status=MiroFishJobStatus.FAILED, error=str(err))
                     return job
 
@@ -509,10 +621,11 @@ class MiroFishAdapter:
                     sim_data = await self._get(
                         client, f"/api/simulation/{job.simulation_id}"
                     )
+                    sim_data_unwrapped = _unwrap_data(sim_data)
                     status_val = str(
-                        sim_data.get("status") or sim_data.get("state") or ""
+                        sim_data_unwrapped.get("status") or sim_data_unwrapped.get("state") or ""
                     ).lower()
-                    raw_progress = sim_data.get("progress")
+                    raw_progress = sim_data_unwrapped.get("progress")
                     if isinstance(raw_progress, (int, float)):
                         job._update(progress=0.5 + float(raw_progress) * 0.4)
 
@@ -526,7 +639,7 @@ class MiroFishAdapter:
                         logger.info("[job=%s] Simulation completed", job.job_id)
                         return job
                     if status_val in ("failed", "error", "cancelled"):
-                        err = sim_data.get("error") or sim_data.get("message") or "simulation failed"
+                        err = sim_data_unwrapped.get("error") or sim_data_unwrapped.get("message") or "simulation failed"
                         job._update(status=MiroFishJobStatus.FAILED, error=str(err))
                         logger.error("[job=%s] Simulation failed: %s", job.job_id, err)
                         return job
@@ -554,7 +667,7 @@ class MiroFishAdapter:
         self, job: MiroFishJob, spec: SimulationSpec
     ) -> ValidationResult | None:
         """
-        Fetch GET /api/simulation/{id}/report and map to ValidationResult.
+        Fetch GET /api/report/by-simulation/{id} and map to ValidationResult.
 
         Returns None (not raises) if the report cannot be retrieved or mapped.
         """
@@ -568,7 +681,7 @@ class MiroFishAdapter:
         async with httpx.AsyncClient() as client:
             try:
                 report = await self._get(
-                    client, f"/api/simulation/{job.simulation_id}/report"
+                    client, f"/api/report/by-simulation/{job.simulation_id}"
                 )
                 result = _map_mirofish_response(report, spec)
                 if result is None:
@@ -645,7 +758,7 @@ def _build_create_payload(spec: SimulationSpec) -> dict[str, Any]:
     """
     return {
         "project_id": spec.prd_summary.get("project_id") or spec.spec_id,
-        "graph_id": spec.prd_summary.get("category") or "prd_validation",
+        "graph_id": spec.prd_summary.get("graph_id") or spec.prd_summary.get("category") or "prd_validation",
         "spec_id": spec.spec_id,
         "prd_summary": spec.prd_summary,
         "validation_config": spec.validation_config.model_dump(),

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import { forceX, forceY, forceCollide } from 'd3-force';
+import { forceX, forceY, forceCollide, forceCenter, forceManyBody } from 'd3-force';
+import { Box, Paper, Text, Group, Button, Badge, Progress, ScrollArea, Slider, Stack } from '@mantine/core';
 
 interface Props {
   performAction: (actionId: string, payload?: any) => Promise<void>;
@@ -178,8 +179,49 @@ export function SimulationRunner({ performAction }: Props) {
   // ── Node & Link Selection State for Filtering ─────────────────────────
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [simulationMode, setSimulationMode] = useState<'mock' | 'live' | 'live_fallback' | null>(null);
   const fgRef = useRef<any>(null);
+
+  // ── Dynamic Visualization Controls State ───────────────────────────────
+  const [nodeSize, setNodeSize] = useState(8);
+  const [sliderLinkWidth, setSliderLinkWidth] = useState(1.2);
+  const [clusterDistance, setClusterDistance] = useState(0.24);
+  const [isSettingPanelOpen, setIsSettingPanelOpen] = useState(true);
+
+  // ── Helper Functions for Dynamic Styling ─────────────────────────────
+  const getDegree = (nodeId: string) => {
+    if (!graphData.links) return 0;
+    return graphData.links.filter((l: any) => {
+      const sId = l.source.id || l.source;
+      const tId = l.target.id || l.target;
+      return sId === nodeId || tId === nodeId;
+    }).length;
+  };
+
+  const getLinkWeight = (link: any) => {
+    if (link.weight !== undefined) return link.weight;
+    if (!graphData.nodes || graphData.nodes.length === 0) return 1.2;
+    
+    const sId = link.source.id || link.source;
+    const tId = link.target.id || link.target;
+    
+    const sNode = graphData.nodes.find(n => n.id === sId);
+    const tNode = graphData.nodes.find(n => n.id === tId);
+    
+    if (!sNode || !tNode) return 1.2;
+    
+    const sGrp = sNode.group;
+    const tGrp = tNode.group;
+    
+    // 리스크(4)와 솔루션(5) 또는 마일스톤(6) 간의 연결
+    if ((sGrp === 4 && tGrp === 5) || (sGrp === 5 && tGrp === 4)) return 3.2;
+    if ((sGrp === 5 && tGrp === 6) || (sGrp === 6 && tGrp === 5)) return 2.6;
+    if ((sGrp === 4 && tGrp === 1) || (sGrp === 1 && tGrp === 4)) return 2.2;
+    if (sGrp === tGrp) return 1.0;
+    
+    return 1.6;
+  };
 
   useEffect(() => {
     if (containerRef.current) {
@@ -206,7 +248,7 @@ export function SimulationRunner({ performAction }: Props) {
     if (graphData.nodes && graphData.nodes.length > 0) {
       const centerX = dimensions.width / 2;
       const centerY = dimensions.height / 2;
-      const radius = Math.min(dimensions.width, dimensions.height) * 0.13;
+      const radius = Math.min(dimensions.width, dimensions.height) * clusterDistance;
       
       graphData.nodes.forEach((node: any) => {
         if (node.x === undefined || node.y === undefined) {
@@ -230,7 +272,7 @@ export function SimulationRunner({ performAction }: Props) {
           let initY = clusterY;
           
           if (crossCount >= 1) {
-            const weight = Math.min(0.35 + crossCount * 0.15, 0.90);
+            const weight = Math.min(0.25 + crossCount * 0.08, 0.70);
             initX = clusterX * (1 - weight) + centerX * weight;
             initY = clusterY * (1 - weight) + centerY * weight;
           } else {
@@ -244,84 +286,143 @@ export function SimulationRunner({ performAction }: Props) {
         }
       });
     }
-  }, [graphData, dimensions]);
+  }, [graphData, dimensions, clusterDistance]);
+
+
+
+  const prevSettingsRef = useRef({ 
+    nodeSize, 
+    clusterDistance, 
+    width: dimensions.width, 
+    height: dimensions.height,
+    nodeCount: 0,
+    linkCount: 0
+  });
 
   // Configure Force Layout Clustering
   useEffect(() => {
     if (fgRef.current) {
       const fg = fgRef.current;
+      
       try {
-        // 1. Center force 제거 (노드들이 한 군데 뭉치는 주범)
-        fg.d3Force('center', null);
-
-        // 2. Link force의 강도와 거리 조율 (오밀조밀하게 모이도록 소폭 좁힘)
-        fg.d3Force('link')
-          ?.distance(25)
-          ?.strength(0.45);
-
-        // 3. Repulsion (서로 밀어내는 힘) 완화하여 밀집도 증가
-        fg.d3Force('charge')?.strength(-110);
-
-        // 4. Group 기반 중심 좌표 유도 force
         const centerX = dimensions.width / 2;
         const centerY = dimensions.height / 2;
-        const radius = Math.min(dimensions.width, dimensions.height) * 0.13;
 
-        fg.d3Force('x', forceX().x((d: any) => {
+        // 0. NaN 좌표 복구 (Sanity Check) 및 가속도 클리핑 (폭주 방지)
+        const currentNodes = fg.d3ForceLayout?.nodes() || fg.graphData()?.nodes;
+        if (currentNodes) {
+          currentNodes.forEach((node: any) => {
+            const maxVel = 15;
+            if (node.vx !== undefined && Math.abs(node.vx) > maxVel) node.vx = Math.sign(node.vx) * maxVel;
+            if (node.vy !== undefined && Math.abs(node.vy) > maxVel) node.vy = Math.sign(node.vy) * maxVel;
+
+            if (node.x === undefined || node.y === undefined || isNaN(node.x) || isNaN(node.y)) {
+              const group = node.group || 0;
+              const angle = (group / 7) * 2 * Math.PI;
+              const r = Math.min(dimensions.width, dimensions.height) * clusterDistance;
+              node.x = centerX + r * Math.cos(angle) + (Math.random() - 0.5) * 20;
+              node.y = centerY + r * Math.sin(angle) + (Math.random() - 0.5) * 20;
+              node.vx = 0;
+              node.vy = 0;
+            }
+          });
+        }
+        
+        // 1. Center force 복원 (중심 분산 방지 및 중앙 정렬 수호 - 인스턴스 갱신)
+        const fCenter = fg.d3Force('center');
+        if (fCenter) {
+          fCenter.x(centerX).y(centerY).strength(0.06);
+        } else {
+          fg.d3Force('center', forceCenter(centerX, centerY).strength(0.06));
+        }
+
+        // 2. Link force의 강도와 거리 조율 (레퍼런스 보존 및 거리 확장)
+        const fLink = fg.d3Force('link');
+        if (fLink) {
+          fLink.distance(90).strength(0.45); // 링크 기본 거리를 90으로 대폭 확대
+        } else {
+          fg.d3Force('link')?.distance(90)?.strength(0.45);
+        }
+
+        // 3. Repulsion (서로 밀어내는 힘) 조율 (레퍼런스 보존 및 반발력 대폭 확대)
+        const fCharge = fg.d3Force('charge');
+        if (fCharge) {
+          fCharge.strength(-700); // 서로 밀쳐내는 반발력을 -700으로 대폭 키워 겹침 방지
+        } else {
+          fg.d3Force('charge', forceManyBody().strength(-700));
+        }
+
+        // 4. Group 기반 중심 좌표 유도 force (clusterDistance 적용) - 기존 레퍼런스를 보존하여 업데이트
+        const radius = Math.min(dimensions.width, dimensions.height) * clusterDistance;
+        
+        const targetX = (d: any) => {
           const group = d.group || 0;
           const angle = (group / 7) * 2 * Math.PI;
-          const clusterX = centerX + radius * Math.cos(angle);
-          
-          const crossCount = graphData.links.filter((l: any) => {
-            const sId = l.source.id || l.source;
-            const tId = l.target.id || l.target;
-            if (sId !== d.id && tId !== d.id) return false;
-            const otherId = sId === d.id ? tId : sId;
-            const otherNode = graphData.nodes.find(n => n.id === otherId);
-            return otherNode && otherNode.group !== group;
-          }).length;
-          
-          if (crossCount >= 1) {
-            const weight = Math.min(0.35 + crossCount * 0.15, 0.90);
-            return clusterX * (1 - weight) + centerX * weight;
-          } else {
-            const pushFactor = 1.15;
-            return centerX + (clusterX - centerX) * pushFactor;
-          }
-        }).strength(0.35));
-
-        fg.d3Force('y', forceY().y((d: any) => {
+          return centerX + radius * Math.cos(angle);
+        };
+        const targetY = (d: any) => {
           const group = d.group || 0;
           const angle = (group / 7) * 2 * Math.PI;
-          const clusterY = centerY + radius * Math.sin(angle);
-          
-          const crossCount = graphData.links.filter((l: any) => {
-            const sId = l.source.id || l.source;
-            const tId = l.target.id || l.target;
-            if (sId !== d.id && tId !== d.id) return false;
-            const otherId = sId === d.id ? tId : sId;
-            const otherNode = graphData.nodes.find(n => n.id === otherId);
-            return otherNode && otherNode.group !== group;
-          }).length;
-          
-          if (crossCount >= 1) {
-            const weight = Math.min(0.35 + crossCount * 0.15, 0.90);
-            return clusterY * (1 - weight) + centerY * weight;
-          } else {
-            const pushFactor = 1.15;
-            return centerY + (clusterY - centerY) * pushFactor;
-          }
-        }).strength(0.35));
+          return centerY + radius * Math.sin(angle);
+        };
 
-        // 5. Collision 힘 (노드가 겹치지 않게)
-        fg.d3Force('collide', forceCollide().radius(18));
+        const fX = fg.d3Force('x');
+        if (fX) {
+          fX.x(targetX).strength(0.22);
+        } else {
+          fg.d3Force('x', forceX().x(targetX).strength(0.22));
+        }
 
-        fg.d3ReheatSimulation();
+        const fY = fg.d3Force('y');
+        if (fY) {
+          fY.y(targetY).strength(0.22);
+        } else {
+          fg.d3Force('y', forceY().y(targetY).strength(0.22));
+        }
+
+        // 5. Collision 힘 (기존 인스턴스 재활용)
+        const getCollideRadius = (node: any) => {
+          const degree = getDegree(node.id);
+          const degreeScale = 1.0 + Math.min(degree * 0.12, 1.2);
+          return (nodeSize * degreeScale) + 12; // 평상시 라벨 텍스트 숨김에 맞춰 충돌 반경을 nodeSize * degreeScale + 12로 축소
+        };
+
+        const fCollide = fg.d3Force('collide');
+        if (fCollide) {
+          fCollide.radius(getCollideRadius).iterations(3);
+        } else {
+          fg.d3Force('collide', forceCollide()
+            .radius(getCollideRadius)
+            .iterations(3)
+          );
+        }
+
+        // 이전 설정값 및 데이터(노드/링크 수) 변경 비교하여 reheat 실행
+        const nodeCount = graphData.nodes?.length || 0;
+        const linkCount = graphData.links?.length || 0;
+        const prev = prevSettingsRef.current;
+        const isSettingsChanged = prev.nodeSize !== nodeSize || 
+                                  prev.clusterDistance !== clusterDistance || 
+                                  prev.width !== dimensions.width || 
+                                  prev.height !== dimensions.height ||
+                                  prev.nodeCount !== nodeCount ||
+                                  prev.linkCount !== linkCount;
+        if (isSettingsChanged) {
+          fg.d3ReheatSimulation();
+          prevSettingsRef.current = { 
+            nodeSize, 
+            clusterDistance, 
+            width: dimensions.width, 
+            height: dimensions.height,
+            nodeCount,
+            linkCount
+          };
+        }
       } catch (err) {
         console.error("Failed to configure D3 force layout clustering:", err);
       }
     }
-  }, [fgRef, dimensions, graphData]);
+  }, [fgRef, dimensions, clusterDistance, nodeSize, graphData]);
 
 
   useEffect(() => {
@@ -330,10 +431,15 @@ export function SimulationRunner({ performAction }: Props) {
 
   useEffect(() => {
     // Generate initial dummy graph
-    const nodes = Array.from({ length: 15 }).map((_, i) => ({ id: `node_${i}`, group: Math.floor(Math.random() * 3) }));
+    const nodes = Array.from({ length: 15 }).map((_, i) => ({ 
+      id: `node_${i}`, 
+      group: Math.floor(Math.random() * 3),
+      birthTime: Date.now() - 10000 // 초기 노드는 이미 애니메이션이 끝난 상태로 둠
+    }));
     const links = Array.from({ length: 20 }).map(() => ({
       source: `node_${Math.floor(Math.random() * 15)}`,
-      target: `node_${Math.floor(Math.random() * 15)}`
+      target: `node_${Math.floor(Math.random() * 15)}`,
+      birthTime: Date.now() - 10000
     }));
     setGraphData({ nodes, links } as any);
 
@@ -361,35 +467,119 @@ export function SimulationRunner({ performAction }: Props) {
           setProgress(data.progress * 100);
         }
 
-        if (data.type === 'graph_update') {
-          // 1. If backend provides real ontology graph data, prioritize binding it
-          if (data.nodes && Array.isArray(data.nodes) && data.links && Array.isArray(data.links)) {
-            setGraphData({ nodes: data.nodes, links: data.links });
-          } else {
-            // 2. High-density Mesh Network algorithm for mock mode (3 nodes yield 4 interconnected links)
-            const timestamp = Date.now();
-            const newNodes = [
-              { id: `node_${timestamp}_0`, group: Math.floor(Math.random() * 3) },
-              { id: `node_${timestamp}_1`, group: Math.floor(Math.random() * 3) },
-              { id: `node_${timestamp}_2`, group: Math.floor(Math.random() * 3) }
-            ];
+        // 실시간 노드/링크 동기화: 페이로드에 nodes와 links가 존재하면 즉시 그래프 데이터 갱신
+        if (data.nodes && Array.isArray(data.nodes) && data.links && Array.isArray(data.links)) {
+          const isInitialLoad = graphData.nodes.length <= 15;
+
+          setGraphData(prev => {
+            // 1. D3 물리 엔진에서 실시간 가동 중인 실제 노드의 최신 물리 좌표 및 birthTime 맵핑
+            const prevCoordsMap = new Map<string, any>();
+            const prevBirthMap = new Map<string, number>();
             
-            setGraphData(prev => {
-              if (prev.nodes.length === 0) {
-                return { nodes: newNodes, links: [] };
+            const activeD3Nodes = fgRef.current?.d3ForceLayout?.nodes();
+            const sourceNodes = (activeD3Nodes && activeD3Nodes.length > 0) ? activeD3Nodes : (prev?.nodes || []);
+
+            sourceNodes.forEach((n: any) => {
+              if (n.x !== undefined && n.y !== undefined) {
+                prevCoordsMap.set(n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy, fx: n.fx, fy: n.fy });
               }
-              const newLinks = [
-                { source: (prev.nodes[Math.floor(Math.random() * prev.nodes.length)] as any)?.id || 'node_0', target: newNodes[0].id },
-                { source: newNodes[0].id, target: newNodes[1].id },
-                { source: newNodes[1].id, target: newNodes[2].id },
-                { source: newNodes[2].id, target: (prev.nodes[Math.floor(Math.random() * prev.nodes.length)] as any)?.id || 'node_1' }
-              ];
+              if (n.birthTime !== undefined) {
+                prevBirthMap.set(n.id, n.birthTime);
+              }
+            });
+
+            // 2. 새 노드 리스트에 좌표 복제 및 birthTime 설정
+            const updatedNodes = data.nodes.map((node: any) => {
+              const coords = prevCoordsMap.get(node.id);
+              const prevBirth = prevBirthMap.get(node.id);
+              const birthTime = prevBirth !== undefined ? prevBirth : Date.now();
+              if (coords) {
+                return {
+                  ...node,
+                  x: coords.x,
+                  y: coords.y,
+                  vx: coords.vx,
+                  vy: coords.vy,
+                  fx: coords.fx,
+                  fy: coords.fy,
+                  birthTime
+                };
+              }
               return {
-                nodes: [...prev.nodes, ...newNodes],
-                links: [...prev.links, ...newLinks]
+                ...node,
+                birthTime
               };
             });
+
+            // 기존 링크들의 birthTime 맵핑
+            const prevLinkBirthMap = new Map<string, number>();
+            if (prev && prev.links) {
+              prev.links.forEach((l: any) => {
+                const sId = l.source.id || l.source;
+                const tId = l.target.id || l.target;
+                const lKey = `${sId}-${tId}`;
+                if (l.birthTime !== undefined) {
+                  prevLinkBirthMap.set(lKey, l.birthTime);
+                }
+              });
+            }
+
+            // 3. 새 링크 리스트에 실제 노드 객체 레퍼런스 이식 및 birthTime 설정
+            const updatedLinks = data.links.map((link: any) => {
+              const sId = link.source.id || link.source;
+              const tId = link.target.id || link.target;
+              const sourceNode = updatedNodes.find((n: any) => n.id === sId);
+              const targetNode = updatedNodes.find((n: any) => n.id === tId);
+              
+              const lKey = `${sId}-${tId}`;
+              const prevBirth = prevLinkBirthMap.get(lKey);
+              const birthTime = prevBirth !== undefined ? prevBirth : Date.now();
+
+              return {
+                ...link,
+                source: sourceNode || sId,
+                target: targetNode || tId,
+                birthTime
+              };
+            });
+
+            return { nodes: updatedNodes, links: updatedLinks };
+          });
+
+          // 최초 로드 시에만 정중앙 정렬 수행하여 카메라 진동 렉 제거
+          if (isInitialLoad && fgRef.current) {
+            const cx = dimensions.width / 2;
+            const cy = dimensions.height / 2;
+            setTimeout(() => {
+              fgRef.current?.centerAt(cx, cy, 300);
+              fgRef.current?.zoomToFit(300, 60);
+            }, 100);
           }
+        } else if (data.type === 'graph_update') {
+          // Fallback dummy node generator (ontology 데이터가 없을 때의 안전장치)
+          const timestamp = Date.now();
+          const newNodes = [
+            { id: `node_${timestamp}_0`, group: Math.floor(Math.random() * 3) },
+            { id: `node_${timestamp}_1`, group: Math.floor(Math.random() * 3) },
+            { id: `node_${timestamp}_2`, group: Math.floor(Math.random() * 3) }
+          ];
+          
+          const animatedNewNodes = newNodes.map(node => ({ ...node, birthTime: Date.now() }));
+          setGraphData(prev => {
+            if (prev.nodes.length === 0) {
+              return { nodes: animatedNewNodes, links: [] };
+            }
+            const newLinks = [
+              { source: (prev.nodes[Math.floor(Math.random() * prev.nodes.length)] as any)?.id || 'node_0', target: animatedNewNodes[0].id, birthTime: Date.now() },
+              { source: animatedNewNodes[0].id, target: animatedNewNodes[1].id, birthTime: Date.now() },
+              { source: animatedNewNodes[1].id, target: animatedNewNodes[2].id, birthTime: Date.now() },
+              { source: animatedNewNodes[2].id, target: (prev.nodes[Math.floor(Math.random() * prev.nodes.length)] as any)?.id || 'node_1', birthTime: Date.now() }
+            ];
+            return {
+              nodes: [...prev.nodes, ...animatedNewNodes],
+              links: [...prev.links, ...newLinks]
+            };
+          });
         }
 
         setLogs(prev => [...prev, data]);
@@ -399,7 +589,7 @@ export function SimulationRunner({ performAction }: Props) {
     };
 
     return () => eventSource.close();
-  }, [performAction]);
+  }, [performAction, dimensions]);
 
   // ── Node & Link interactive handlers ───────────────────────────────────
   const handleNodeClick = (node: any) => {
@@ -466,11 +656,11 @@ export function SimulationRunner({ performAction }: Props) {
           ${role}
         </div>
         <div style="margin-bottom: 8px; font-size: 12px;">
-          <strong style="color: #3b82f6;">👤 페르소나:</strong> 
+          <strong style="color: #3b82f6;">페르소나:</strong> 
           <span style="color: #cbd5e1;">${persona}</span>
         </div>
         <div style="font-size: 12px;">
-          <strong style="color: #10b981;">🎯 검증 목표:</strong> 
+          <strong style="color: #10b981;">검증 목표:</strong> 
           <span style="color: #cbd5e1;">${goal}</span>
         </div>
       </div>
@@ -502,11 +692,13 @@ export function SimulationRunner({ performAction }: Props) {
   };
 
   // ── Filtered Dialogue Feed ─────────────────────────────────────────────
-  const filteredLogs = logs.filter(log => {
-    if (selectedNodeId) {
-      const selectedNode = graphData.nodes.find(n => n.id === selectedNodeId);
-      if (!selectedNode) return true;
-      if (log.type === 'agent_post') {
+  const getFilteredLogs = () => {
+    let result = logs.filter(log => {
+      if (log.type !== 'agent_post') return false;
+      
+      if (selectedNodeId) {
+        const selectedNode = graphData.nodes.find(n => n.id === selectedNodeId);
+        if (!selectedNode) return false;
         const nodeName = selectedNode.label || selectedNode.id;
         const isAgentMatch = log.agent_name === nodeName || 
                              log.agent_name?.includes(nodeName) || 
@@ -559,249 +751,453 @@ export function SimulationRunner({ performAction }: Props) {
 
         return isAgentMatch || isMentioned || isConnectedAgentMatch || isKeywordMatch;
       }
-      return false;
-    }
-    
-    if (selectedLinkId) {
-      const [sourceId, targetId] = selectedLinkId.split('-');
-      const sourceNode = graphData.nodes.find(n => n.id === sourceId);
-      const targetNode = graphData.nodes.find(n => n.id === targetId);
-      if (!sourceNode || !targetNode) return true;
-      if (log.type === 'agent_post') {
+      
+      if (selectedLinkId) {
+        const [sourceId, targetId] = selectedLinkId.split('-');
+        const sourceNode = graphData.nodes.find(n => n.id === sourceId);
+        const targetNode = graphData.nodes.find(n => n.id === targetId);
+        if (!sourceNode || !targetNode) return false;
         const sourceName = sourceNode.label || sourceNode.id;
         const targetName = targetNode.label || targetNode.id;
         return log.agent_name === sourceName || log.agent_name === targetName ||
                log.agent_name?.includes(sourceName) || log.agent_name?.includes(targetName);
       }
-      return false;
+      
+      return true;
+    });
+
+    // Fallback: 1차 필터링 결과가 없고 특정 노드를 누른 경우 노드 그룹 연관 대화 필터링
+    if (selectedNodeId && result.length === 0) {
+      const selectedNode = graphData.nodes.find(n => n.id === selectedNodeId);
+      if (selectedNode) {
+        const nodeGroup = selectedNode.group;
+        return logs.filter(log => {
+          if (log.type !== 'agent_post') return false;
+          
+          if (nodeGroup === 0) {
+            const roles = ["product manager", "pm", "architect", "engineer", "designer", "frontend", "backend"];
+            const isRoleMatch = roles.some(r => log.agent_type?.toLowerCase().includes(r));
+            const hasKeyword = ["기획", "개발", "화면", "디자인", "아키텍트", "코드"].some(k => log.content?.includes(k));
+            return isRoleMatch || hasKeyword;
+          }
+          if (nodeGroup === 1) {
+            const roles = ["security", "auditor", "legal", "counsel", "lawyer"];
+            const isRoleMatch = roles.some(r => log.agent_type?.toLowerCase().includes(r));
+            const hasKeyword = ["보안", "규격", "규제", "법무", "계약", "개인정보", "pii", "컴플라이언스"].some(k => log.content?.includes(k));
+            return isRoleMatch || hasKeyword;
+          }
+          if (nodeGroup === 2) {
+            const roles = ["financial", "cfo", "analyst", "qa", "test", "sre", "reliability"];
+            const isRoleMatch = roles.some(r => log.agent_type?.toLowerCase().includes(r));
+            const hasKeyword = ["비용", "예산", "재무", "장애", "테스트", "통계", "가용성", "서버"].some(k => log.content?.includes(k));
+            return isRoleMatch || hasKeyword;
+          }
+          if (nodeGroup === 3) {
+            const roles = ["sales", "hr", "manager", "seller", "representative"];
+            const isRoleMatch = roles.some(r => log.agent_type?.toLowerCase().includes(r));
+            const hasKeyword = ["영업", "노조", "상담원", "셀러", "정산", "이탈", "고객"].some(k => log.content?.includes(k));
+            return isRoleMatch || hasKeyword;
+          }
+          if (nodeGroup === 4) {
+            const keywords = ["위험", "리스크", "우려", "장애", "유출", "지연", "정체", "오환불", "피해", "이탈"];
+            return keywords.some(k => log.content?.includes(k));
+          }
+          if (nodeGroup === 5) {
+            const keywords = ["해결", "솔루션", "대안", "hitl", "승인 큐", "알림톡", "위젯", "섀도우", "shadow", "failover", "ollama", "업스킬링", "스피너"];
+            return keywords.some(k => log.content?.includes(k));
+          }
+          if (nodeGroup === 6) {
+            const keywords = ["마일스톤", "합의", "출시", "런칭", "bmt", "정식", "완성", "consensus"];
+            const isConclusion = log.agent_name === "PM 김철수" || log.agent_type?.includes("Product Manager");
+            return keywords.some(k => log.content?.includes(k)) || isConclusion;
+          }
+          return true;
+        });
+      }
     }
-    
-    return true;
-  });
+    return result;
+  };
+  const filteredLogs = getFilteredLogs();
 
   return (
     <div style={{ flex: 1, display: 'flex' }}>
       {/* Network Graph Area */}
-      <div ref={containerRef} style={{ flex: 2, background: '#020617', position: 'relative' }}>
+      <div ref={containerRef} style={{ flex: 2, background: 'var(--bg-app)', position: 'relative' }}>
         <ForceGraph2D
           ref={fgRef}
           width={dimensions.width}
           height={dimensions.height}
           graphData={graphData}
-          nodeAutoColorBy="group"
-          linkColor={() => '#334155'}
-          backgroundColor="#020617"
-          nodeRelSize={6}
+          backgroundColor="var(--bg-app)"
           d3AlphaDecay={0.05}
           d3VelocityDecay={0.2}
           nodeLabel={nodeLabelHandler}
           linkLabel={linkLabelHandler}
           onNodeClick={handleNodeClick}
           onLinkClick={handleLinkClick}
+          onNodeHover={(node: any) => {
+            setHoveredNodeId(node ? node.id : null);
+          }}
           onEngineStop={() => { console.log('Graph settled'); }}
+          linkColor={(link: any) => {
+            const age = Date.now() - (link.birthTime || (Date.now() - 10000));
+            const duration = 1200;
+            const t = Math.min(age / duration, 1);
+            const easeT = t * (2 - t); // quadratic ease-out
+            return `rgba(148, 163, 184, ${0.45 * easeT})`;
+          }}
+          linkWidth={(link: any) => {
+            const sourceId = link.source.id || link.source;
+            const targetId = link.target.id || link.target;
+            const linkId = `${sourceId}-${targetId}`;
+            const weight = getLinkWeight(link);
+            return selectedLinkId === linkId ? (sliderLinkWidth * weight * 1.5) : (sliderLinkWidth * weight);
+          }}
+          linkDirectionalParticles={1}
+          linkDirectionalParticleWidth={2}
+          linkDirectionalParticleSpeed={0.006}
+          linkDirectionalParticleColor={() => '#38bdf8'}
+          nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+            // NaN 좌표 1차 방어 처리
+            if (node.x === undefined || node.y === undefined || isNaN(node.x) || isNaN(node.y)) {
+              node.x = dimensions.width / 2 + (Math.random() - 0.5) * 50;
+              node.y = dimensions.height / 2 + (Math.random() - 0.5) * 50;
+            }
+
+            const label = node.label || node.id;
+            const labelFontSize = 10 / globalScale;
+            
+            // Transition 애니메이션 연산 (Age & Easing)
+            const age = Date.now() - (node.birthTime || (Date.now() - 10000));
+            const duration = 1200; // 1.2초 동안 부드럽게 등장
+            const t = Math.min(age / duration, 1);
+            const easeOutCubic = (x: number): number => 1 - Math.pow(1 - x, 3);
+            const easeT = easeOutCubic(t);
+
+            ctx.save();
+            ctx.globalAlpha = easeT; // 페이드인 효과 적용
+
+            // 연결 차수(degree)에 비례한 노드 반경 연산
+            const degree = getDegree(node.id);
+            const degreeScale = 1.0 + Math.min(degree * 0.12, 1.2);
+
+            // 1. 노드 원 그리기 (스케일 업 및 degree 기반 확대 반영)
+            const r = nodeSize * easeT * degreeScale;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false);
+            
+            // 그룹별 채우기 색상 지정 (범례 색상 매칭)
+            const groupColors = [
+              '#3b82f6', // Group 0: 기획/개발
+              '#10b981', // Group 1: 보안/규제
+              '#eab308', // Group 2: 재무/SRE/QA
+              '#a855f7', // Group 3: 현업/생태계
+              '#ef4444', // Group 4: 도출된 리스크
+              '#f97316', // Group 5: 솔루션
+              '#64748b'  // Group 6: 마일스톤
+            ];
+            const color = groupColors[node.group % groupColors.length] || '#94a3b8';
+            ctx.fillStyle = color;
+            ctx.fill();
+            
+            // 2. 외곽선(테두리) 그리기 - 흰색 테두리
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            
+            // 선택된 노드일 경우 추가 강조 링 그리기
+            const isSelected = selectedNodeId === node.id;
+            const isHovered = hoveredNodeId === node.id;
+
+            if (isSelected) {
+              ctx.strokeStyle = '#38bdf8';
+              ctx.lineWidth = 2.5;
+              ctx.stroke();
+            }
+
+            // 3. 텍스트 라벨 그리기 (마우스를 올렸거나 클릭했을 때만 렌더링)
+            if (isSelected || isHovered) {
+              const textY = node.y + r + 4;
+              ctx.font = `bold ${labelFontSize}px sans-serif`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'top';
+              
+              // 텍스트 시인성을 높이기 위한 반투명 뒷배경 박스
+              const textWidth = ctx.measureText(label).width;
+              ctx.fillStyle = 'rgba(2, 6, 23, 0.8)';
+              ctx.fillRect(node.x - textWidth / 2 - 2, textY - 1, textWidth + 4, labelFontSize + 2);
+              
+              ctx.fillStyle = '#f8fafc';
+              ctx.fillText(label, node.x, textY);
+            }
+
+            ctx.restore();
+          }}
+          nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+            const r = nodeSize;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r + 2, 0, 2 * Math.PI, false);
+            ctx.fillStyle = color;
+            ctx.fill();
+          }}
         />
         
+        {/* Visualization Controller Panel */}
+        <Paper
+          shadow="md"
+          p="sm"
+          withBorder
+          style={{
+            position: 'absolute',
+            top: 110,
+            left: 20,
+            background: 'rgba(9, 13, 22, 0.95)',
+            borderColor: 'rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(10px)',
+            zIndex: 10,
+            width: '280px',
+            color: '#f8fafc',
+            pointerEvents: 'auto'
+          }}
+        >
+          <Group justify="space-between" mb={isSettingPanelOpen ? 'xs' : 0}>
+            <Text fw={800} size="xs" c="cyan.4" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              시각화 설정
+            </Text>
+            <Button 
+              size="xs"
+              variant="subtle"
+              color="gray"
+              onClick={() => setIsSettingPanelOpen(!isSettingPanelOpen)}
+              styles={{ root: { padding: '2px 6px', height: 'auto' } }}
+            >
+              {isSettingPanelOpen ? '접기' : '조절하기'}
+            </Button>
+          </Group>
+
+          {isSettingPanelOpen && (
+            <Stack gap="xs" style={{ fontSize: '0.7rem' }}>
+              {/* Node Size Slider */}
+              <Box>
+                <Group justify="space-between" mb={3}>
+                  <Text size="xs" c="dimmed">노드 크기 (Node Size)</Text>
+                  <Text size="xs" fw={700} c="cyan.4">{nodeSize}px</Text>
+                </Group>
+                <Slider 
+                  min={4}
+                  max={18}
+                  step={1}
+                  value={nodeSize}
+                  onChange={setNodeSize}
+                  size="xs"
+                  color="cyan"
+                />
+              </Box>
+
+              {/* Link Thickness Slider */}
+              <Box>
+                <Group justify="space-between" mb={3}>
+                  <Text size="xs" c="dimmed">링크 굵기 (Link Thickness)</Text>
+                  <Text size="xs" fw={700} c="cyan.4">{sliderLinkWidth}px</Text>
+                </Group>
+                <Slider 
+                  min={0.5}
+                  max={5.0}
+                  step={0.1}
+                  value={sliderLinkWidth}
+                  onChange={setSliderLinkWidth}
+                  size="xs"
+                  color="cyan"
+                />
+              </Box>
+
+              {/* Cluster Distance Slider */}
+              <Box>
+                <Group justify="space-between" mb={3}>
+                  <Text size="xs" c="dimmed">군집 거리 (Cluster Distance)</Text>
+                  <Text size="xs" fw={700} c="cyan.4">{clusterDistance.toFixed(2)}</Text>
+                </Group>
+                <Slider 
+                  min={0.10}
+                  max={0.80}
+                  step={0.02}
+                  value={clusterDistance}
+                  onChange={setClusterDistance}
+                  size="xs"
+                  color="cyan"
+                />
+              </Box>
+            </Stack>
+          )}
+        </Paper>
+        
         {/* Graph Legend Panel */}
-        <div style={{ 
-          position: 'absolute', 
-          bottom: 80, 
-          left: 20, 
-          background: 'rgba(15, 23, 42, 0.95)', 
-          padding: '1rem', 
-          borderRadius: '12px', 
-          backdropFilter: 'blur(8px)', 
-          border: '1px solid #334155',
-          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
-          zIndex: 10,
-          maxWidth: '280px',
-          pointerEvents: 'auto'
-        }}>
-          <h4 style={{ margin: '0 0 10px 0', fontSize: '0.875rem', color: '#f8fafc', fontWeight: 700 }}>역할군(Group) 범례</h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.75rem', color: '#cbd5e1' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#3b82f6' }}></span>
-              <span>기획 및 개발 (Group 0) - PM, 아키텍트 등</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#10b981' }}></span>
-              <span>보안 및 규제 (Group 1) - 감사관, 법무팀장</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#eab308' }}></span>
-              <span>재무, SRE, QA (Group 2) - CFO, QA, SRE</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#a855f7' }}></span>
-              <span>현업 및 생태계 (Group 3) - 영업, HR, 셀러</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444' }}></span>
-              <span>도출된 리스크 (Group 4) - 보안/재무/정산</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#f97316' }}></span>
-              <span>대안 및 솔루션 (Group 5) - HITL, 섀도우모드</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#64748b' }}></span>
-              <span>출시 마일스톤 (Group 6) - 런칭 목표</span>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ position: 'absolute', top: 20, left: 20, background: 'rgba(15, 23, 42, 0.85)', padding: '1.25rem', borderRadius: '12px', backdropFilter: 'blur(6px)', border: '1px solid #334155', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', zIndex: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', color: '#f8fafc', fontWeight: 800 }}>Simulation Network</h3>
+        <Paper
+          shadow="md"
+          p="sm"
+          withBorder
+          style={{ 
+            position: 'absolute', 
+            bottom: 80, 
+            left: 20, 
+            background: 'rgba(9, 13, 22, 0.95)', 
+            borderColor: 'rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(8px)', 
+            zIndex: 10,
+            width: '280px',
+            pointerEvents: 'auto'
+          }}
+        >
+          <Text fw={700} size="xs" mb="xs" c="white">역할군(Group) 범례</Text>
+          <Stack gap={6}>
+            <Group gap="xs" wrap="nowrap">
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#3b82f6', flexShrink: 0 }}></span>
+              <Text size="10px" c="dimmed">기획 및 개발 (Group 0) - PM, 아키텍트 등</Text>
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}></span>
+              <Text size="10px" c="dimmed">보안 및 규제 (Group 1) - 감사관, 법무팀장</Text>
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#eab308', flexShrink: 0 }}></span>
+              <Text size="10px" c="dimmed">재무, SRE, QA (Group 2) - CFO, QA, SRE</Text>
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#a855f7', flexShrink: 0 }}></span>
+              <Text size="10px" c="dimmed">현업 및 생태계 (Group 3) - 영업, HR, 셀러</Text>
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#ef4444', flexShrink: 0 }}></span>
+              <Text size="10px" c="dimmed">도출된 리스크 (Group 4) - 보안/재무/정산</Text>
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#f97316', flexShrink: 0 }}></span>
+              <Text size="10px" c="dimmed">대안 및 솔루션 (Group 5) - HITL, 섀도우모드</Text>
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#64748b', flexShrink: 0 }}></span>
+              <Text size="10px" c="dimmed">출시 마일스톤 (Group 6) - 런칭 목표</Text>
+            </Group>
+          </Stack>
+        </Paper>
+ 
+        <Paper
+          shadow="md"
+          p="sm"
+          withBorder
+          style={{ 
+            position: 'absolute', 
+            top: 20, 
+            left: 20, 
+            background: 'rgba(9, 13, 22, 0.95)', 
+            borderColor: 'rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(6px)', 
+            zIndex: 10 
+          }}
+        >
+          <Group gap="xs" mb={4}>
+            <Text fw={800} size="sm" c="white">Simulation Network</Text>
             {simulationMode && (
-              <span style={{ 
-                display: 'inline-flex', 
-                alignItems: 'center', 
-                gap: '5px',
-                fontSize: '0.7rem', 
-                fontWeight: 700, 
-                padding: '3px 8px', 
-                borderRadius: '9999px',
-                background: simulationMode === 'live' 
-                  ? 'rgba(16, 185, 129, 0.15)' 
-                  : simulationMode === 'live_fallback' 
-                  ? 'rgba(239, 68, 68, 0.15)' 
-                  : 'rgba(245, 158, 11, 0.15)',
-                color: simulationMode === 'live' 
-                  ? '#10b981' 
-                  : simulationMode === 'live_fallback' 
-                  ? '#ef4444' 
-                  : '#f59e0b',
-                border: simulationMode === 'live' 
-                  ? '1px solid rgba(16, 185, 129, 0.3)' 
-                  : simulationMode === 'live_fallback' 
-                  ? '1px solid rgba(239, 68, 68, 0.3)' 
-                  : '1px solid rgba(245, 158, 11, 0.3)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>
-                <span style={{ 
-                  width: '6px', 
-                  height: '6px', 
-                  borderRadius: '50%', 
-                  background: simulationMode === 'live' 
-                    ? '#10b981' 
-                    : simulationMode === 'live_fallback' 
-                    ? '#ef4444' 
-                    : '#f59e0b'
-                }} />
-                {simulationMode === 'live' 
-                  ? 'MiroFish Live' 
-                  : simulationMode === 'live_fallback' 
-                  ? 'Live Failed (Fallback)' 
-                  : 'Mock Mode'}
-              </span>
+              <Badge 
+                color={simulationMode === 'live' ? 'green' : simulationMode === 'live_fallback' ? 'red' : 'yellow'} 
+                variant="light" 
+                size="xs"
+              >
+                {simulationMode === 'live' ? 'MiroFish Live' : simulationMode === 'live_fallback' ? 'Live Failed' : 'Mock Mode'}
+              </Badge>
             )}
-          </div>
-          <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.875rem' }}>Nodes: {graphData.nodes.length} | Links: {graphData.links.length}</p>
-        </div>
-
-        <div style={{ position: 'absolute', bottom: 20, left: 20, right: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pointerEvents: 'none' }}>
-            <div style={{ flex: 1, marginRight: '2rem', pointerEvents: 'auto' }}>
-                <div style={{ height: '4px', background: '#1e293b', borderRadius: '2px', overflow: 'hidden' }}>
-                    <div style={{ width: `${progress}%`, height: '100%', background: '#3b82f6', transition: 'width 0.3s ease' }}></div>
-                </div>
-                <div style={{ textAlign: 'left', fontSize: '0.75rem', color: '#94a3b8', marginTop: '4px' }}>
-                    {progress >= 100 ? '✅ Simulation Complete' : `Running... ${Math.round(progress)}%`}
-                </div>
-            </div>
-
+          </Group>
+          <Text size="xs" c="dimmed">Nodes: {graphData.nodes.length} | Links: {graphData.links.length}</Text>
+        </Paper>
+ 
+        <Box style={{ position: 'absolute', bottom: 20, left: 20, right: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pointerEvents: 'none' }}>
+            <Box style={{ flex: 1, marginRight: '2rem', pointerEvents: 'auto' }}>
+                <Progress
+                  value={progress}
+                  size="xs"
+                  radius="xl"
+                  animated={progress < 100}
+                  color="indigo"
+                />
+                <Text size="10px" c="dimmed" mt={4}>
+                    {progress >= 100 ? 'Simulation Complete' : `Running... ${Math.round(progress)}%`}
+                </Text>
+            </Box>
+ 
             {progress >= 100 && (
-              <button 
+              <Button 
+                variant="gradient"
+                gradient={{ from: 'indigo', to: 'cyan' }}
                 onClick={() => performAction('stop_simulation')}
-                style={{ 
-                  pointerEvents: 'auto',
-                  padding: '0.75rem 1.5rem', 
-                  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: '12px', 
-                  fontSize: '0.95rem', 
-                  fontWeight: 600, 
-                  cursor: 'pointer',
-                  boxShadow: '0 10px 15px -3px rgba(37, 99, 235, 0.4)',
-                  transition: 'all 0.2s ease',
-                  whiteSpace: 'nowrap'
-                }}
-                onMouseOver={(e) => (e.currentTarget.style.transform = 'translateY(-2px)')}
-                onMouseOut={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                style={{ pointerEvents: 'auto', whiteSpace: 'nowrap' }}
               >
                 View Full Report →
-              </button>
+              </Button>
             )}
-        </div>
+        </Box>
       </div>
 
       {/* Real-time Feeds Array */}
-      <div style={{ flex: 1, borderLeft: '1px solid #1e293b', background: '#0f172a', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '1rem', borderBottom: '1px solid #1e293b', background: '#020617', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', color: '#f8fafc' }}>Live Feed</h3>
+      <Box style={{ flex: 1, borderLeft: '1px solid var(--border)', background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column' }}>
+        <Group justify="space-between" p="sm" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(9, 13, 22, 0.85)' }}>
+            <Text fw={700} size="sm" c="white">Live Feed</Text>
             {(selectedNodeId || selectedLinkId) && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ 
-                  background: '#1e293b', 
-                  color: '#38bdf8', 
-                  fontSize: '0.75rem', 
-                  padding: '4px 8px', 
-                  borderRadius: '6px', 
-                  border: '1px solid #334155',
-                  fontWeight: 600
-                }}>
+              <Group gap="xs">
+                <Badge size="xs" variant="outline" color="cyan">
                   {selectedNodeId ? `필터: ${METADATA_DICTIONARY[selectedNodeId]?.role || selectedNodeId}` : '필터: 연결선'}
-                </span>
-                <button 
+                </Badge>
+                <Button 
+                  size="xs"
+                  color="red"
+                  variant="light"
                   onClick={() => { setSelectedNodeId(null); setSelectedLinkId(null); }}
-                  style={{
-                    background: '#ef4444',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '4px 8px',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseOver={(e) => (e.currentTarget.style.background = '#dc2626')}
-                  onMouseOut={(e) => (e.currentTarget.style.background = '#ef4444')}
+                  styles={{ root: { padding: '2px 6px', height: 'auto' } }}
                 >
                   전체 보기
-                </button>
-              </div>
+                </Button>
+              </Group>
             )}
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {filteredLogs.length === 0 ? (
-            <div style={{ color: '#64748b', fontSize: '0.875rem', textAlign: 'center', marginTop: '2rem' }}>
-              해당 주체의 발언 내역이 없습니다.
-            </div>
-          ) : (
-            filteredLogs.map((log, i) => (
-              <div key={i} style={{ 
-                  background: log.type === 'agent_post' ? '#1e293b' : 'transparent', 
-                  padding: '0.75rem', 
-                  borderRadius: '8px',
-                  border: log.type === 'agent_post' ? '1px solid #334155' : 'none',
-                  color: log.type === 'agent_post' ? '#e2e8f0' : '#64748b',
-                  fontSize: '0.875rem'
-              }}>
+        </Group>
+        
+        <ScrollArea style={{ flex: 1, padding: '16px' }}>
+          <Stack gap="sm">
+            {filteredLogs.length === 0 ? (
+              <Text size="xs" c="dimmed" ta="center" mt="xl">
+                해당 주체의 발언 내역이 없습니다.
+              </Text>
+            ) : (
+              filteredLogs.map((log, i) => (
+                <Paper
+                  key={i}
+                  p="xs"
+                  radius="sm"
+                  className="feed-item-animate"
+                  bg={log.type === 'agent_post' ? 'rgba(255, 255, 255, 0.02)' : 'transparent'}
+                  style={{
+                    border: log.type === 'agent_post' ? '1px solid rgba(255, 255, 255, 0.05)' : 'none'
+                  }}
+                >
                   {log.type === 'agent_post' && (
-                      <div style={{ fontWeight: 600, marginBottom: '0.25rem', color: '#38bdf8' }}>
-                          {log.agent_name} <span style={{ color: '#64748b', fontWeight: 400, fontSize: '0.75rem' }}>({log.agent_type})</span>
-                      </div>
+                    <Group gap="xs" mb={4}>
+                      <Text size="xs" fw={700} c="cyan.4">{log.agent_name}</Text>
+                      <Text size="10px" c="dimmed">({log.agent_type})</Text>
+                    </Group>
                   )}
-                  <div>{log.content || log.message}</div>
-                  {log.timestamp && <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: '0.5rem' }}>{new Date(log.timestamp).toLocaleTimeString()}</div>}
-              </div>
-            ))
-          )}
-          <div ref={logsEndRef} />
-        </div>
-      </div>
+                  <Text size="xs" style={{ color: log.type === 'agent_post' ? '#cbd5e1' : '#64748b' }}>
+                    {log.content || log.message}
+                  </Text>
+                  {log.timestamp && (
+                    <Text size="9px" c="dimmed" mt={4} ta="right">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </Text>
+                  )}
+                </Paper>
+              ))
+            )}
+            <div ref={logsEndRef} />
+          </Stack>
+        </ScrollArea>
+      </Box>
     </div>
   );
 }

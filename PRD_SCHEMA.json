@@ -161,7 +161,7 @@
         "mode": { "$ref": "#/$defs/SourceMode" },
         "chat_turn_count": { "type": "integer", "minimum": 0 },
         "session_id": { "type": "string", "minLength": 1 },
-        "notes": { "type": "string" }
+        "notes": { "type": ["string", "null"] }
       }
     },
     "Metadata": {
@@ -182,8 +182,8 @@
         "language": { "$ref": "#/$defs/Language" },
         "status": { "$ref": "#/$defs/PrdStatus" },
         "source": { "$ref": "#/$defs/Source" },
-        "owner": { "type": "string" },
-        "version": { "type": "string" }
+        "owner": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] }
       }
     },
     "Product": {
@@ -239,11 +239,11 @@
           "minItems": 1
         },
         "secondary_personas": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": { "$ref": "#/$defs/Persona" }
         },
         "non_targets": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": { "type": "string" }
         }
       }
@@ -333,7 +333,7 @@
         "id": { "type": "string", "minLength": 1 },
         "statement": { "type": "string", "minLength": 1 },
         "priority": { "$ref": "#/$defs/Priority" },
-        "notes": { "type": "string" }
+        "notes": { "type": ["string", "null"] }
       }
     },
     "Integration": {
@@ -366,7 +366,7 @@
           "items": { "type": "string" }
         },
         "integrations": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": { "$ref": "#/$defs/Integration" }
         }
       }
@@ -379,7 +379,7 @@
         "name": { "type": "string", "minLength": 1 },
         "target": { "type": "string", "minLength": 1 },
         "timeframe": { "type": "string" },
-        "notes": { "type": "string" }
+        "notes": { "type": ["string", "null"] }
       }
     },
     "SuccessMetrics": {
@@ -394,7 +394,7 @@
           "minItems": 1
         },
         "guardrail_metrics": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": { "$ref": "#/$defs/Metric" }
         }
       }
@@ -470,11 +470,11 @@
         },
         "simulation_requirement": { "type": "string", "minLength": 1 },
         "validation_templates": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": { "$ref": "#/$defs/ValidationTemplate" }
         },
         "must_answer_questions": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": { "type": "string" }
         }
       }

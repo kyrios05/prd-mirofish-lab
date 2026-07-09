@@ -35,12 +35,295 @@ mirofish = MiroFishService()
 async def propose_stakeholders(request: Request):
     """Analyze PRD and propose a list of stakeholders with personas."""
     try:
-        # Use raw request.json() to bypass FastAPI's automatic validation
-        # which can cause 422 if the body is not a perfect dict or null
         payload = await request.json()
         if payload is None:
             payload = {}
-            
+    except Exception:
+        payload = {}
+
+    is_live = payload.get("live", False)
+
+    # 만약 Mock 모드이거나 Qwen 라이브 모드가 아닌 경우, 30인의 고밀도 전문가 명단 즉시 반환
+    # 역할은 같아도 사람명이 달라지며 (ex. 아키텍트 A, 아키텍트 B), Review Angle과 Likely Objections가 매우 디테일하게 작성됨.
+    if not is_live or settings.mirofish_mode != "live":
+        return {
+            "status": "success",
+            "stakeholders": [
+                {
+                    "name": "PM 김철수",
+                    "role": "Product Manager",
+                    "review_angle": "비즈니스 가치 극대화 및 기한 준수 평가\n- MVP 조기 런칭 가능성 및 시장성 분석\n- 개발 리소스 대비 사업성 ROI 검증",
+                    "likely_objections": [
+                        "핵심 가치와 무관한 오버엔지니어링으로 인한 출시 일정 지연 위험",
+                        "자율 환불 범위 확대에 따른 재무적 리스크 및 손실 보증 미흡"
+                    ]
+                },
+                {
+                    "name": "부PM 이영희",
+                    "role": "Associate PM",
+                    "review_angle": "세부 요구사항 정의의 구체성 평가\n- 스토리보드 화면 구성의 정합성 검토\n- 현업 부서들과의 마일스톤 싱크 관리",
+                    "likely_objections": [
+                        "기획 명세의 모호성으로 인한 개발 일정 재산정 우려",
+                        "유관 부서별 업무 범위 분쟁 조정 지연"
+                    ]
+                },
+                {
+                    "name": "개발 아키텍트 박팀장",
+                    "role": "Lead Architect",
+                    "review_angle": "시스템 확장성 및 아키텍처 타당성 검토\n- 표준 MCP(Model Context Protocol) 인터페이스 설계성\n- E2E Latency 1.5초 달성을 위한 분산 큐 구성",
+                    "likely_objections": [
+                        "비표준 레거시 연동으로 인한 기술 부채 누적 가능성",
+                        "HWP 표 파싱의 한계에 따른 시스템 신뢰성 저하"
+                    ]
+                },
+                {
+                    "name": "시스템 아키텍트 임정민",
+                    "role": "System Architect A",
+                    "review_angle": "인프라 리소스 배치 및 로컬 Ollama 모델 가동 사양 분석\n- 분산 캐시 레이어 구성 최적화 검토\n- 고트래픽 대응 스케일아웃 시나리오 수립",
+                    "likely_objections": [
+                        "로컬 하드웨어 스펙 초과 시 스위칭 타임아웃 발생 위험",
+                        "API Gateway 세션 유실로 인한 상태 비동화 현상"
+                    ]
+                },
+                {
+                    "name": "시스템 아키텍트 조경진",
+                    "role": "System Architect B",
+                    "review_angle": "데이터 파이프라인 이중화 검증\n- DB 트랜잭션 락 유발 지점 사전 분석\n- Failover 라우팅 지연 시간 300ms 준수 여부",
+                    "likely_objections": [
+                        "DB 쓰기 집중 시 커넥션 풀 고갈 및 세션 마비",
+                        "대체 LLM 전환 성능 통계 부재"
+                    ]
+                },
+                {
+                    "name": "보안감사관 이지훈",
+                    "role": "Security Auditor",
+                    "review_angle": "PII 개인정보 비식별화 컴플라이언스 감독\n- Zero-Retention 데이터 미저장 정책 준수 증명\n- 금융 심의 및 ISMS-P 인증 승인 요건 검증",
+                    "likely_objections": [
+                        "외부 API 송수신 시 민감 로그 유출 및 해킹 침해 리스크",
+                        "PII 마스킹 홉 우회 보안 누수 위험"
+                    ]
+                },
+                {
+                    "name": "보안엔지니어 정민우",
+                    "role": "Security Engineer A",
+                    "review_angle": "PII 마스킹 필터링 정규식 속도 검증\n- 네트워크 패킷 암호화 TLS 1.3 유효성 검사\n- 웹소켓 데이터 유실 감지 모니터링",
+                    "likely_objections": [
+                        "초당 1,000건 폭증 시 동기 필터 오버헤드 50ms 돌파 우려",
+                        "인증 토큰 취약점에 따른 세션 탈취 리스크"
+                    ]
+                },
+                {
+                    "name": "보안엔지니어 강동호",
+                    "role": "Security Engineer B",
+                    "review_angle": "외부 공격 벡터 및 비정형 프롬프트 인젝션 취약점 검증\n- 가상 취약점 침투 테스트 수행\n- 로깅 감사 체계 무결성 확보 여부",
+                    "likely_objections": [
+                        "프롬프트 인젝션을 통한 내부 데이터베이스 우회 조회 리스크",
+                        "감사 로그 보존 용량 초과 시 덮어쓰기 누수"
+                    ]
+                },
+                {
+                    "name": "법무팀장 최윤서",
+                    "role": "Legal Counsel",
+                    "review_angle": "AI 자율 환불의 법리적 책임 소재 분석\n- 상담원 개입(HITL) 의무 승인 정책 규정 해석\n- 오정산 피해 시 당사 배상 면책 한도 검토",
+                    "likely_objections": [
+                        "AI 오동작으로 인한 무단 대금 유출 시 구상권 청구 경로 미비",
+                        "전자금융거래법 상 자율 제어 권한 위반 소지"
+                    ]
+                },
+                {
+                    "name": "법률대리인 신재현",
+                    "role": "Legal Counsel B",
+                    "review_angle": "약관 수정 조항 정합성 검사\n- B2B 판매 제약 계약서 내 AI 배상 한도 해석\n- 상담원 업스킬링 배치 시 노동법 위반 여부 검토",
+                    "likely_objections": [
+                        "판매자 연쇄 탈퇴 시 집단 소송 방어 조항 결여",
+                        "상담원 직무 강제 전환 시 노동조합 단체 교섭 저항"
+                    ]
+                },
+                {
+                    "name": "CFO 정우진",
+                    "role": "Financial Director",
+                    "review_angle": "상담 운영 비용 절감 목표 대비 ROI 도출\n- 글로벌 LLM API 호출 토큰 비용 시뮬레이션\n- 서버 이중화 인프라 OPEX 적정성 평가",
+                    "likely_objections": [
+                        "PII 동기 필터 구동에 따른 API 토큰 낭비 및 재무적 적자 전환",
+                        "TCR 성공형 수수료율 도입 시 현금 흐름 불확실성"
+                    ]
+                },
+                {
+                    "name": "재무팀원 송미경",
+                    "role": "Financial Analyst",
+                    "review_angle": "인프라 자본비용(CAPEX) 감가상각 분석\n- 월별 클라우드 서버 가동비 대비 매출 공헌도 분석\n- 섀도우 모드 4주 실측 비용 검증",
+                    "likely_objections": [
+                        "CS 운영비 절감액 대비 초기 솔루션 도입 감가상각비 초과 리스크",
+                        "섀도우 모드 비용 예산 초과"
+                    ]
+                },
+                {
+                    "name": "QA매니저 강혜원",
+                    "role": "Quality Assurance Lead",
+                    "review_angle": "RAG 환각율 3% 미만 보증 체계 검증\n- 고객사 매뉴얼 HWP 표 문서 오인식률 계측\n- AI 판단 유예 시 이탈 큐 자동 전환 신뢰도 평가",
+                    "likely_objections": [
+                        "비정형 데이터 인식 한계로 인한 오답률 10% 돌파 위험",
+                        "이탈 큐 이관 지연 시 대기 콜 폭증 대란"
+                    ]
+                },
+                {
+                    "name": "QA엔지니어 조현식",
+                    "role": "QA Engineer A",
+                    "review_angle": "엣지 케이스 시나리오 자동화 테스트 스크립트 작성\n- 신뢰성 분포 차트 시뮬레이터 가동 적합성 검토\n- 입력 데이터 유효성 경계값 검사",
+                    "likely_objections": [
+                        "RAG 응답 무작위성에 대한 동적 회귀 테스트 커버리지 누수",
+                        "모의 트래픽 주입 시나리오 불충분"
+                    ]
+                },
+                {
+                    "name": "QA테스터 김태호",
+                    "role": "QA Engineer B",
+                    "review_angle": "모바일 알림톡 승인 버튼 및 터치 편의성 실기 테스트\n- 5만원 한도 강제 취소 시 수동 UI 응답 실측\n- 오류 팝업 발생 시 화면 복귀 상태 점검",
+                    "likely_objections": [
+                        "구형 안드로이드 브라우저 렌더링 깨짐 현상",
+                        "다중 터치 시 중복 이벤트 API 다중 호출 버그"
+                    ]
+                },
+                {
+                    "name": "QA테스터 윤아름",
+                    "role": "QA Engineer C",
+                    "review_angle": "실시간 대시보드 갱신 이벤트 정밀 모니터링\n- 로그 검색 필터 키워드 정확도 검증\n- 툴팁 마우스 호버 바인딩 성능 수동 테스트",
+                    "likely_objections": [
+                        "대량 로그 적재 시 화면 지연 렉 발생",
+                        "필터 키워드 불일치 시 텅 빈 화면 노출 현상"
+                    ]
+                },
+                {
+                    "name": "SRE리드 한상민",
+                    "role": "SRE Lead",
+                    "review_angle": "인프라 이중화 가용망 구축 및 SLA 99.9% 보증\n- 가동 시간 메트릭 측정 체계 구축\n- 장애 시 Ollama 로컬 전환 안정성 검증",
+                    "likely_objections": [
+                        "단일 LLM 장애 시 복원 로직 부재로 가용성 붕괴 우려",
+                        "트래픽 서지 발생 시 컨테이너 오토스케일링 렉 유발"
+                    ]
+                },
+                {
+                    "name": "SRE엔지니어 윤석호",
+                    "role": "SRE Engineer B",
+                    "review_angle": "프로메테우스 연동 리소스 모니터링 대시보드 설계\n- CPU/Memory 임계치 알람 구성 타당성 검사\n- 로깅 스토리지 대역폭 검토",
+                    "likely_objections": [
+                        "디스크 IOPS 한계 도달 시 로그 누락 및 서버 다운",
+                        "Failover 작동 스위칭 모니터링 실시간 연동 부재"
+                    ]
+                },
+                {
+                    "name": "디자이너 정희채",
+                    "role": "UI/UX Designer A",
+                    "review_angle": "HITL 승인 대시보드 와이어프레임 설계성 평가\n- 모바일 알림톡 승인 위젯 여정 가시성\n- 톤앤매너 설정의 드래그앤드롭 사용성 검증",
+                    "likely_objections": [
+                        "HITL 화면의 불필요한 단계 추가로 복잡성 가중 우려",
+                        "정산 차트 시각 가독성 부실로 현업 피로도 상승"
+                    ]
+                },
+                {
+                    "name": "디자이너 박소율",
+                    "role": "UI/UX Designer B",
+                    "review_angle": "모던 글라스모피즘 스타일 가이드 라인 준수 검사\n- 접근성(A11y) 명암비 만족 여부 검토\n- 다크모드 대응 컬러 토큰 정합성 확인",
+                    "likely_objections": [
+                        "모바일 UI 대비 명암비 미달로 시인성 하락 리스크",
+                        "일관되지 않은 보더 래디우스 설계"
+                    ]
+                },
+                {
+                    "name": "프론트엔드 한아름",
+                    "role": "Frontend Engineer A",
+                    "review_angle": "웹소켓 실시간 이벤트 수신 단 렌더링 최적화 검사\n- CPU 메인 스레드 렉 방지를 위한 가상 스크롤 검증\n- PII 안심 로더 글래스 애니메이션 성능 평가",
+                    "likely_objections": [
+                        "대량 실시간 차트 업데이트 시 프론트 브라우저 다운 현상",
+                        "새로고침 연타 시 웹소켓 핸드셰이크 유실"
+                    ]
+                },
+                {
+                    "name": "프론트엔드 서지원",
+                    "role": "Frontend Engineer B",
+                    "review_angle": "리액트 컴포넌트 재사용 컴포넌트 설계 효율성\n- 로컬스토리지 토글 상태 바인딩 무결성 검증\n- 차트 라이브러리 메모리 누수 방지 조치 평가",
+                    "likely_objections": [
+                        "불필요한 전체 페이지 무한 렌더링 유발 가능성",
+                        "컴포넌트 언마운트 시 메모리 누수 잔존"
+                    ]
+                },
+                {
+                    "name": "프론트엔드 김민식",
+                    "role": "Frontend Engineer C",
+                    "review_angle": "모바일 반응형 레이아웃 테스팅 및 디바이스 호환성 검증\n- 모바일 웹 크로스브라우징 체크\n- 터치 타겟 가독성 및 최소 48px 영역 사수 여부",
+                    "likely_objections": [
+                        "일부 구형 모바일 뷰포트에서 레이아웃 겹침 발생",
+                        "아이폰 사파리 터치 지연 현상"
+                    ]
+                },
+                {
+                    "name": "백엔드 김도현",
+                    "role": "Backend Engineer A",
+                    "review_angle": "FastAPI ASGI 비동기 루프 성능 및 분산 락 최적화 검증\n- DB 커넥션 풀 가용 병목 파악\n- 50만원 환불 트랜잭션 동시성 격리 수준 검토",
+                    "likely_objections": [
+                        "동시 결제 취소 요청 시 데이터 정합성 깨짐 리스크",
+                        "비동기 태스크 큐 브로커 연결 해제 장애"
+                    ]
+                },
+                {
+                    "name": "백엔드 임채원",
+                    "role": "Backend Engineer B",
+                    "review_angle": "벡터 데이터베이스 인덱스 효율성 및 표 전처리 검토\n- 표 파싱 RAG 오인식률 개선 임베딩 튜닝\n- PDF-to-Markdown 파서 변환 무결성 계측",
+                    "likely_objections": [
+                        "텍스트 파편화 RAG로 인한 컨텍스트 훼손 리스크",
+                        "임베딩 청킹 크기 과다로 RAG 비용 상승"
+                    ]
+                },
+                {
+                    "name": "백엔드 오정훈",
+                    "role": "Backend Engineer C",
+                    "review_angle": "API Gateway 비동기 프록시 라우팅 무장애 동작 검증\n- 로깅 원천 정보 적재 속도 모니터링\n- Ollama 로컬 라우팅 오버헤드 300ms 사수 검사",
+                    "likely_objections": [
+                        "로컬 AI 스위칭 도중 메모리 가용량 오버플로우",
+                        "로깅 가동 시 DB I/O 쓰기 지연"
+                    ]
+                },
+                {
+                    "name": "영업팀장 오세현",
+                    "role": "B2B Sales Lead",
+                    "review_angle": "B2B 엔터프라이즈 세일즈 계약 요구 사양 부합도 평가\n- 6월 기술 검증(BMT) 통과 마일스톤 준수 여부\n- 25억 규모 영업 파이프라인 개방 조건 분석",
+                    "likely_objections": [
+                        "자율 환불 한도를 낮출 경우 대기업 바이어의 CS 비용 감축 효용 저하로 이탈",
+                        "경쟁 솔루션 대비 자동화 커버리지 격하"
+                    ]
+                },
+                {
+                    "name": "CS/HR 서진우",
+                    "role": "CS & HR Manager",
+                    "review_angle": "현업 CS 상담 조직의 심리적 저항 및 노사 갈등 중재 평가\n- 단순 반복 환불 업무 감축에 따른 교육 로드맵 타당성\n- AI 감사관 직무 업스킬링 체계 유효성 검사",
+                    "likely_objections": [
+                        "CS 운영 현장 노동조합의 일방적 구조조정 우려에 따른 파업 선언",
+                        "업스킬링 리소스 및 교육비 예산 미비 시 반발"
+                    ]
+                },
+                {
+                    "name": "셀러대표 민경아",
+                    "role": "Seller Representative A",
+                    "review_angle": "50만원 자율 결제 취소 시 입점 셀러 정산 손실 차단성\n- 오정산 피해에 대한 플랫폼 귀책 및 배상 조항 평가\n- 모바일 검토 UI 내 증빙 요약 신뢰성 분석",
+                    "likely_objections": [
+                        "셀러 최종 확인 절차 누락에 따른 정산 오차 및 자금 유출 위험",
+                        "오정산 대금 보상 제도 명문화 거부 시 집단 탈퇴 행동화"
+                    ]
+                },
+                {
+                    "name": "셀러대표 김동현",
+                    "role": "Seller Representative B",
+                    "review_angle": "정산 일자 지연 방지 및 이의 제기 프로세스 타당성 검사\n- 모바일 승인 알림톡 수신 속도 실시간성 평가\n- 셀러 정산 계좌 연동 안전성 분석",
+                    "likely_objections": [
+                        "알림톡 증빙 표 누락 또는 렌더 깨짐 시 승인 유예로 대금 동결 우려",
+                        "플랫폼 신뢰 훼손 시 셀러 동맹 450개사의 즉시 이주"
+                    ]
+                }
+            ]
+        }
+
+    # Live Mode
+    try:
         # Try to parse as full PRD first
         try:
             from pydantic import ValidationError
@@ -53,95 +336,18 @@ async def propose_stakeholders(request: Request):
         return {"status": "success", "stakeholders": [s.model_dump() for s in stakeholders]}
     except Exception as e:
         logger.error(f"Stakeholder proposal failed, returning rich B2B enterprise fallback panel: {e}")
-        # Return highly comprehensive B2B enterprise fallback stakeholders if LLM fails
+        # Live mode fallback if LLM fails
         return {
-            "status": "success",            "stakeholders": [
+            "status": "success",
+            "stakeholders": [
                 {
-                    "name": "PM 김철수 (Product Manager)",
+                    "name": "PM 김철수",
                     "role": "Product Manager",
-                    "review_angle": "비즈니스 가치 극대화, MVP 조기 런칭 가능성 및 시장 타당성을 검증하고 현실적인 개발 일정 준수를 평가합니다.",
-                    "likely_objections": [
-                        "핵심 가치와 무관한 오버엔지니어링으로 인한 런칭 지연 우려",
-                        "비합리적인 개발 리소스 및 공수 낭비"
-                    ]
-                },
-                {
-                    "name": "개발 아키텍트 박팀장 (Lead Architect)",
-                    "role": "Lead Architect",
-                    "review_angle": "표준 MCP(Model Context Protocol) 설계, 비동기 액션 처리의 안정성, E2E Latency 1.5초 달성을 위한 분산 처리 구조를 평가합니다.",
-                    "likely_objections": [
-                        "비표준 레거시 연동 도입 시 유지보수 및 확장성 결여 우려",
-                        "HWP 표 파싱의 기술적 신뢰도 한계 및 처리 비용 부담",
-                        "장애 복구를 위한 예외 처리 및 백아웃 정책 부재"
-                    ]
-                },
-                {
-                    "name": "보안 감사관 이지훈 (Security Auditor)",
-                    "role": "Security Auditor",
-                    "review_angle": "B2B 엔터프라이즈 환경에서의 데이터 학습 방지(Zero-Retention), PII 개인정보 마스킹 성공률 및 컴플라이언스 준수성을 검사합니다.",
-                    "likely_objections": [
-                        "외부 LLM 노출로 인한 기업/금융권의 영업비밀 및 개인정보 유출 리스크",
-                        "ISMS-P 및 CSAP 규제 요구사항 미충족 우려"
-                    ]
-                },
-                {
-                    "name": "법무 팀장 최윤서 (Legal Counsel)",
-                    "role": "Legal Counsel",
-                    "review_angle": "자율형 AI 에이전트 업무 수행 시의 법률적 리스크, 오작동 배상 책임 소재 및 데이터 소유권 귀속 정책을 해석하고 평가합니다.",
-                    "likely_objections": [
-                        "AI 오작동 및 손실 발생 시 명확한 책임 소재 규정 미비",
-                        "상담원 개입(HITL) 결합 승인 단계 누락으로 인한 법적 규제 위반 가능성"
-                    ]
-                },
-                {
-                    "name": "CFO 정우진 (Financial Director)",
-                    "role": "Financial Director",
-                    "review_angle": "글로벌 LLM 호출 원가, 토큰 효율성 및 상담 운영 비용 절감 목표 대비 ROI(투자수익률)를 계산합니다.",
-                    "likely_objections": [
-                        "과도한 LLM API 호출로 인한 인프라 비용 폭증 가능성",
-                        "TCR(업무완결율) 기반 과금 구조 도입에 따른 재무적 불확실성"
-                    ]
-                },
-                {
-                    "name": "QA 매니저 강혜원 (Quality Assurance Lead)",
-                    "role": "Quality Assurance Lead",
-                    "review_angle": "RAG 환각율(3% 미만) 검증, 고객사 오인식 방지 조치 및 상담 이탈 지점 추적 등 에이전트 품질 표준을 평가합니다.",
-                    "likely_objections": [
-                        "비정형 데이터(HWP 등) 인식 신뢰도 부족 및 잘못된 정보 제공 우려",
-                        "에이전트 상담 실패 시 상담원 연결 자동 전환의 예외 처리 체계 부실"
-                    ]
-                },
-                {
-                    "name": "DevOps 전문가 한상민 (SRE Lead)",
-                    "role": "Site Reliability Engineer",
-                    "review_angle": "장애 시 대체 LLM Failover 체계 설계 및 목표 SLA 99.9% 달성을 위한 무중단 가용 인프라를 검증합니다.",
-                    "likely_objections": [
-                        "단일 LLM 장애 시 대안 가용 솔루션 부족 및 전면 다운타임 리스크",
-                        "실시간 트래픽 폭증 시 인프라 스케일링 병목 유발 우려"
-                    ]
-                },
-                {
-                    "name": "UI/UX 디자이너 정희채 (UI/UX Designer)",
-                    "role": "UI/UX Designer",
-                    "review_angle": "대화형 승인 위젯 사용성과 드래그앤드롭 편의성, 현업 관리자를 위한 직관적 사용자 여정을 평가합니다.",
-                    "likely_objections": [
-                        "HITL 관리자 도구 화면의 복잡성 및 정보 아키텍처 혼선 우려",
-                        "실시간 모니터링 시각화 화면의 직관성 부족"
-                    ]
-                },
-                {
-                    "name": "프론트엔드 개발자 한아름 (Frontend Engineer)",
-                    "role": "Frontend Engineer",
-                    "review_angle": "PII 마스킹 필터링의 브라우저 바인딩 성능 및 차트 데이터 렌더링 최적화를 통한 E2E Latency 1.5초 준수 여부를 검증합니다.",
-                    "likely_objections": [
-                        "실시간 분포도 차트 렌더링 시 브라우저 메인 스레드 블로킹 유발 가능성",
-                        "대량 로그 동시 처리 시 프론트엔드 화면 렉 및 스크롤 지연 현상"
-                    ]
+                    "review_angle": "비즈니스 가치 극대화 및 기한 준수 평가",
+                    "likely_objections": ["일정 지연 위험"]
                 }
             ]
         }
-
-
 
 @router.post("/setup")
 async def setup_simulation(request: Request):
@@ -179,7 +385,12 @@ async def setup_simulation(request: Request):
 @router.post("/start")
 async def start_simulation(payload: dict[str, Any]):
     """Start the multi-agent simulation run on MiroFish."""
-    if settings.mirofish_mode != "live":
+    # 사용자가 Reality Seeds 설정창에서 조정한 stakeholder 리스트를 받아 세션 상태에 보관
+    session_state["stakeholder_personas"] = payload.get("stakeholder_personas", [])
+    
+    is_live = payload.get("live", False)
+
+    if not is_live or settings.mirofish_mode != "live":
         return {"status": "started", "simulation_id": "sim_mock_12345678"}
 
     try:
@@ -199,6 +410,10 @@ async def start_simulation(payload: dict[str, Any]):
         
         return {"status": "started", "simulation_id": sim_id}
     except Exception as e:
+        logger.error(f"Start failed: {e}")
+        if settings.mirofish_fallback_to_mock:
+            return {"status": "started", "simulation_id": "sim_mock_error_fallback"}
+        raise HTTPException(status_code=500, detail=str(e))
         logger.error(f"Start failed: {e}")
         if settings.mirofish_fallback_to_mock:
             return {"status": "started", "simulation_id": "sim_mock_error_fallback"}
@@ -455,166 +670,266 @@ ALL_MOCK_LINKS = [
 ]
 
 async def _simulation_event_generator(mode: str = "mock", reason: str = None):
-    """Rich SSE stream for simulation with 35+ high-density stakeholder debate interactions."""
+    """Rich SSE stream for simulation with 30+ dynamic stakeholder personas and real-time graph growth sync."""
     import json
+    import asyncio
+    from datetime import datetime, timezone
+
     yield f'data: {json.dumps({"type": "mode_check", "mode": mode, "reason": reason})}\n\n'
     if reason:
         yield f'data: {json.dumps({"type": "system_log", "content": f"🚨 Live Engine Fallback: {reason}", "timestamp": datetime.now(timezone.utc).isoformat(), "mode": mode})}\n\n'
     def _ts(): return datetime.now(timezone.utc).isoformat()
     
-    # 5-stage progressive graph slices matching the 70+ node / 140+ edge requirements
-    stage1_nodes = ALL_MOCK_NODES[:15]
-    stage1_links = ALL_MOCK_LINKS[:25]
+    # 1. session_state에서 stakeholder_personas 가져오기 (30명)
+    raw_personas = session_state.get("stakeholder_personas", [])
+    if not raw_personas:
+        # Fallback 30 Stakeholders
+        raw_personas = [
+            {"name": "PM 김철수", "role": "Product Manager", "review_angle": "비즈니스 가치 극대화 및 기한 준수 평가", "likely_objections": ["출시 지연"]},
+            {"name": "부PM 이영희", "role": "Associate PM", "review_angle": "세부 명세 구체성", "likely_objections": ["모호성"]},
+            {"name": "개발 아키텍트 박팀장", "role": "Lead Architect", "review_angle": "시스템 안정성", "likely_objections": ["기술 부채"]},
+            {"name": "시스템 아키텍트 임정민", "role": "System Architect A", "review_angle": "인프라 사양", "likely_objections": ["하드웨어 스펙"]},
+            {"name": "시스템 아키텍트 조경진", "role": "System Architect B", "review_angle": "트랜잭션 이중화", "likely_objections": ["데이터 락"]},
+            {"name": "보안감사관 이지훈", "role": "Security Auditor", "review_angle": "PII 개인정보 비식별화", "likely_objections": ["영업비밀 유출"]},
+            {"name": "보안엔지니어 정민우", "role": "Security Engineer A", "review_angle": "마스킹 필터링 속도", "likely_objections": ["필터 병목"]},
+            {"name": "보안엔지니어 강동호", "role": "Security Engineer B", "review_angle": "외부 공격 취약점", "likely_objections": ["인젝션 리스크"]},
+            {"name": "법무팀장 최윤서", "role": "Legal Counsel", "review_angle": "책임 소재 분석", "likely_objections": ["배상 한도"]},
+            {"name": "법률대리인 신재현", "role": "Legal Counsel B", "review_angle": "약관 수정", "likely_objections": ["노동법 위반"]},
+            {"name": "CFO 정우진", "role": "Financial Director", "review_angle": "운영비용 ROI", "likely_objections": ["API 비용"]},
+            {"name": "재무팀원 송미경", "role": "Financial Analyst", "review_angle": "CAPEX 감가상각", "likely_objections": ["예산 초과"]},
+            {"name": "QA매니저 강혜원", "role": "Quality Assurance Lead", "review_angle": "RAG 환각율 통제", "likely_objections": ["오답률 위험"]},
+            {"name": "QA엔지니어 조현식", "role": "QA Engineer A", "review_angle": "스트레스 유효성", "likely_objections": ["시나리오 누수"]},
+            {"name": "QA테스터 김태호", "role": "QA Engineer B", "review_angle": "모바일 UI 테스트", "likely_objections": ["구형 디바이스"]},
+            {"name": "QA테스터 윤아름", "role": "QA Engineer C", "review_angle": "실시간 데이터 검증", "likely_objections": ["대량 로그 렉"]},
+            {"name": "SRE리드 한상민", "role": "SRE Lead", "review_angle": "가용망 가동 시간 SLA", "likely_objections": ["Failover 장애"]},
+            {"name": "SRE엔지니어 윤석호", "role": "SRE Engineer B", "review_angle": "그라파나 연동", "likely_objections": ["로그 누락"]},
+            {"name": "디자이너 정희채", "role": "UI/UX Designer A", "review_angle": "대시보드 편의성", "likely_objections": ["복잡성 가중"]},
+            {"name": "디자이너 박소율", "role": "UI/UX Designer B", "review_angle": "명암비 가이드", "likely_objections": ["일관성 결여"]},
+            {"name": "프론트엔드 한아름", "role": "Frontend Engineer A", "review_angle": "차트 렌더링 성능", "likely_objections": ["메인 스레드 렉"]},
+            {"name": "프론트엔드 서지원", "role": "Frontend Engineer B", "review_angle": "컴포넌트 리렌더링", "likely_objections": ["메모리 누수"]},
+            {"name": "프론트엔드 김민식", "role": "Frontend Engineer C", "review_angle": "반응형 가시성", "likely_objections": ["구형 모바일 깨짐"]},
+            {"name": "백엔드 김도현", "role": "Backend Engineer A", "review_angle": "FastAPI 비동기", "likely_objections": ["트랜잭션 락"]},
+            {"name": "백엔드 임채원", "role": "Backend Engineer B", "review_angle": "벡터 DB RAG 튜닝", "likely_objections": ["RAG 임베딩 렉"]},
+            {"name": "백엔드 오정훈", "role": "Backend Engineer C", "review_angle": "로깅 API 셋업", "likely_objections": ["DB I/O 지연"]},
+            {"name": "영업팀장 오세현", "role": "B2B Sales Lead", "review_angle": "세일즈 경쟁력", "likely_objections": ["바이어 이탈"]},
+            {"name": "CS/HR 서진우", "role": "CS & HR Manager", "review_angle": "CS 직무 업스킬링", "likely_objections": ["노조 반발"]},
+            {"name": "셀러대표 민경아", "role": "Seller Representative A", "review_angle": "정산 손실 차단성", "likely_objections": ["오정산 위험"]},
+            {"name": "셀러대표 김동현", "role": "Seller Representative B", "review_angle": "모바일 알림 속도", "likely_objections": ["정산 지연"]}
+        ]
+
+    # 2. 동적 전문가 노드 리스트 구성 (30인)
+    dynamic_expert_nodes = []
+    def get_group_by_role(role: str) -> int:
+        role_lower = role.lower()
+        if any(r in role_lower for r in ["pm", "architect", "engineer", "developer", "designer", "frontend", "backend"]):
+            return 0
+        elif any(r in role_lower for r in ["auditor", "counsel", "legal", "lawyer"]):
+            return 1
+        elif any(r in role_lower for r in ["financial", "cfo", "analyst", "qa", "test", "sre"]):
+            return 2
+        else:
+            return 3
+
+    for i, p in enumerate(raw_personas):
+        node_id = f"S_{i}"
+        role = p.get("role", "Expert")
+        group = get_group_by_role(role)
+        label = p.get("name", f"Stakeholder {i}").split(" (")[0]
+        dynamic_expert_nodes.append({"id": node_id, "group": group, "label": label})
+
+    # 기존 ALL_MOCK_NODES 중 12명의 전문가를 제외하고 나머지 리스크/요구사항/솔루션/마일스톤 노드 병합
+    non_expert_nodes = [n for n in ALL_MOCK_NODES if not n["id"] in [
+        "PM_Kim", "Sales_Oh", "HR_Seo", "Sec_Lee", "Legal_Choi", "Arch_Park", 
+        "CFO_Woo", "QA_Kang", "SRE_Han", "FE_Han", "Seller_Min", "Design_Jung"
+    ]]
+    final_nodes = dynamic_expert_nodes + non_expert_nodes
+
+    # 3. 링크(Edge) 동적 맵핑
+    persona_id_mapping = {
+        "PM_Kim": [f"S_{i}" for i, p in enumerate(raw_personas) if "pm" in p.get("role", "").lower()],
+        "Arch_Park": [f"S_{i}" for i, p in enumerate(raw_personas) if "architect" in p.get("role", "").lower() or "backend" in p.get("role", "").lower()],
+        "Sec_Lee": [f"S_{i}" for i, p in enumerate(raw_personas) if "security" in p.get("role", "").lower() or "auditor" in p.get("role", "").lower()],
+        "Legal_Choi": [f"S_{i}" for i, p in enumerate(raw_personas) if "legal" in p.get("role", "").lower() or "counsel" in p.get("role", "").lower()],
+        "CFO_Woo": [f"S_{i}" for i, p in enumerate(raw_personas) if "financial" in p.get("role", "").lower() or "cfo" in p.get("role", "").lower() or "analyst" in p.get("role", "").lower()],
+        "QA_Kang": [f"S_{i}" for i, p in enumerate(raw_personas) if "qa" in p.get("role", "").lower() or "test" in p.get("role", "").lower()],
+        "SRE_Han": [f"S_{i}" for i, p in enumerate(raw_personas) if "sre" in p.get("role", "").lower() or "reliability" in p.get("role", "").lower()],
+        "Design_Jung": [f"S_{i}" for i, p in enumerate(raw_personas) if "designer" in p.get("role", "").lower() or "design" in p.get("role", "").lower()],
+        "FE_Han": [f"S_{i}" for i, p in enumerate(raw_personas) if "frontend" in p.get("role", "").lower() or "client" in p.get("role", "").lower()],
+        "Sales_Oh": [f"S_{i}" for i, p in enumerate(raw_personas) if "sales" in p.get("role", "").lower() or "영업" in p.get("role", "").lower()],
+        "HR_Seo": [f"S_{i}" for i, p in enumerate(raw_personas) if "hr" in p.get("role", "").lower() or "cs" in p.get("role", "").lower() or "manager" in p.get("role", "").lower()],
+        "Seller_Min": [f"S_{i}" for i, p in enumerate(raw_personas) if "seller" in p.get("role", "").lower() or "representative" in p.get("role", "").lower()]
+    }
+
+    # 폴백 매핑
+    for old_id, new_list in list(persona_id_mapping.items()):
+        if not new_list:
+            if old_id in ["PM_Kim", "Arch_Park", "Design_Jung", "FE_Han"]:
+                fallback_grp = 0
+            elif old_id in ["Sec_Lee", "Legal_Choi"]:
+                fallback_grp = 1
+            elif old_id in ["CFO_Woo", "QA_Kang", "SRE_Han"]:
+                fallback_grp = 2
+            else:
+                fallback_grp = 3
+            persona_id_mapping[old_id] = [n["id"] for n in dynamic_expert_nodes if n["group"] == fallback_grp]
+
+    final_links = []
+    link_counts = {}
     
-    stage2_nodes = ALL_MOCK_NODES[:32]
-    stage2_links = ALL_MOCK_LINKS[:58]
+    for link in ALL_MOCK_LINKS:
+        s = link["source"]
+        t = link["target"]
+        
+        if s in persona_id_mapping:
+            lst = persona_id_mapping[s]
+            cnt = link_counts.get(s, 0)
+            s_new = lst[cnt % len(lst)]
+            link_counts[s] = cnt + 1
+        else:
+            s_new = s
+            
+        if t in persona_id_mapping:
+            lst = persona_id_mapping[t]
+            cnt = link_counts.get(t, 0)
+            t_new = lst[cnt % len(lst)]
+            link_counts[t] = cnt + 1
+        else:
+            t_new = t
+            
+        final_links.append({"source": s_new, "target": t_new})
+
+    # 4. 대화 발언자 치환을 위한 매핑 사전 구축
+    def get_actual_persona_name(old_name: str) -> tuple[str, str]:
+        mapping_key = None
+        if "PM" in old_name or "김철수" in old_name:
+            mapping_key = "PM_Kim"
+        elif "아키텍트" in old_name or "박팀장" in old_name:
+            mapping_key = "Arch_Park"
+        elif "보안" in old_name or "이지훈" in old_name:
+            mapping_key = "Sec_Lee"
+        elif "법무" in old_name or "최윤서" in old_name:
+            mapping_key = "Legal_Choi"
+        elif "CFO" in old_name or "정우진" in old_name:
+            mapping_key = "CFO_Woo"
+        elif "QA" in old_name or "강혜원" in old_name:
+            mapping_key = "QA_Kang"
+        elif "SRE" in old_name or "한상민" in old_name:
+            mapping_key = "SRE_Han"
+        elif "디자이너" in old_name or "정희채" in old_name:
+            mapping_key = "Design_Jung"
+        elif "프론트" in old_name or "한아름" in old_name:
+            mapping_key = "FE_Han"
+        elif "영업" in old_name or "오세현" in old_name:
+            mapping_key = "Sales_Oh"
+        elif "CS/HR" in old_name or "서진우" in old_name:
+            mapping_key = "HR_Seo"
+        elif "셀러" in old_name or "민경아" in old_name:
+            mapping_key = "Seller_Min"
+            
+        if mapping_key and mapping_key in persona_id_mapping:
+            target_id = persona_id_mapping[mapping_key][0]
+            target_node = next((n for n in dynamic_expert_nodes if n["id"] == target_id), None)
+            if target_node:
+                idx = int(target_id.split("_")[1])
+                p = raw_personas[idx]
+                return target_node["label"], p.get("role", "Expert")
+                
+        return old_name, "Expert"
+
+    # 대화 단계
+    dialogues = [
+        ("PM 김철수", "Product Manager", "이번 Simply AI Agent는 기업용 레거시와 연동하여 주문 조회, 주문 취소, 50만원 이하 자율 환불 액션을 완수해야 합니다. 상담원 개입을 최소화하여 목표 TCR(업무완결율) 40% 이상을 기한 내 달성합시다."),
+        ("CS/HR 서진우", "CS & HR Manager", "김철수 PM님, 현장을 전혀 모르는 안일한 발상입니다! AI가 TCR 40%를 달성하면 CS 상담원들의 직무가 축소될 것이 뻔한데 CS 노조가 가만히 있겠습니까? 당장 내일 아침 본사 로비에서 구조조정 규탄 피켓 시위를 벌이겠다고 강경하게 경고해 왔습니다. 현장 합의 없는 도입은 전면 사보타주만 부를 뿐입니다!"),
+        ("영업팀장 오세현", "B2B Sales Lead", "서 매니저님, 지금 노조 시위 때문에 프로젝트를 지연시키자는 겁니까? 이번 6월 BMT(기술검증)를 통과하지 못하면 당장 연간 25억 규모의 대형 고객사 3곳과의 거래 딜이 즉시 무산됩니다. B2B 비즈니스 생존보다 시위 방어가 더 중요합니까?"),
+        ("CS/HR 서진우", "CS & HR Manager", "오세현 팀장님, 단기 실적에 눈이 멀어 곪아 터질 폭탄을 방치하는 게 더 위험합니다! CS 상담원들이 반발해서 RAG 입력 데이터 분류 태그를 엉망으로 입력하거나 고의로 피드백 점수를 흐려놓으면, 전체 AI 응답 정확도가 30% 이하로 곤두박질칠 겁니다. 그때 발생하는 유무형의 신뢰 손실은 25억이 아니라 250억으로도 못 메웁니다!"),
+        ("보안감사관 이지훈", "Security Auditor", "두 분 싸움보다 더 심각한 컴플라이언스 붕괴 위험이 있습니다. 외부 LLM API 통신 시 계좌번호와 주민번호 같은 개인식별정보(PII) 유출 위험은 치명적입니다. 50ms 이내 초고속 PII 마스킹 차단율 100%와 데이터 미저장(Zero-Retention) 조건이 실측 입증되지 않으면 금융감독원 보안성 심의에서 바로 반려되어 서비스 자체가 셧다운됩니다!"),
+        ("아키텍트 박팀장", "Lead Architect", "이 감사관님, 50ms 이내 100% 차단은 물리적으로 불가능합니다! API 게이트웨이 전단에 다중 정규식 필터와 검출 모델을 동기식으로 끼워 넣으면 프록시 홉 오버헤드만 최소 600ms가 추가됩니다. 결과적으로 전체 E2E 레이턴시가 목표치인 1.5초를 훌쩍 넘어 2.5초에 달할 텐데, 화면이 렉 걸려 굳어버리는 서비스를 유저가 쓰겠습니까?"),
+        ("프론트 한아름", "Frontend Engineer", "맞습니다! 동기식 전처리 필터링이 연동되면 화면이 3초 이상 멈춰 서게 되고, 답답한 사용자들이 새로고침을 연타해서 API 커넥션이 폭증하고 웹소켓 서버가 크래시 날 겁니다. 속도가 무너진 보안은 사용자 이탈만 초래하는 UX 파괴일 뿐입니다!"),
+        ("보안감사관 이지훈", "Security Auditor", "한아름 엔지니어님, 화면 렉보다 금융 컴플라이언스 위반으로 인한 영업정지 처분과 과징금 10억원이 훨씬 치명적입니다! 보안 필터링은 타협 불가능한 절대 의무입니다. 기술적 어려움은 엔지니어링 리소스를 갈아 넣어서라도 50ms 기준을 지켜내야 할 영역입니다!"),
+        ("법무팀장 최윤서", "Legal Counsel", "보안뿐만 아니라 책임 귀속도 엉망입니다. AI 판단 오작동으로 50만원 이하 자율 환불이 잘못 집행되어 대금이 무단 유출되었을 때, 그 귀책사유와 민사상 배상 책임 기준이 PRD에 전혀 명시되어 있지 않습니다. 인간이 최종 통제하는 승인 대기 큐(HITL)가 차단 장치로 강제되지 않는다면, 법무팀은 배상 계약 조항에 절대 승인 도장을 찍을 수 없습니다!"),
+        ("CFO 정우진", "Financial Director", "재무 관점에서도 이 사업은 전면 보류해야 합니다. 박팀장님이 설계하신 PII 필터용 프록시 서버 이중화 구성과 고성능 전처리 LLM 호출 토큰 비용을 계산해보니 API 비용만 월 1,800만원이 찍힙니다. 기존 CS 인력 감축에 따른 운영비 절감액 1,100만원을 훌쩍 초과하는데, 배보다 배꼽이 더 큰 적자 프로젝트를 왜 승인해야 합니까?"),
+        ("SRE리드 한상민", "SRE Lead", "정 이사님, 단순 호출 비용만 보면 적자처럼 보이지만 가용망이 무너져서 발생하는 서비스 장애로 인한 단 1시간의 매출 손실이 평균 8,500만원입니다! 가용성 SLA 99.9%를 수호하기 위한 프록시 이중화 인프라 투자는 적자가 아닌, 서비스 생존을 위한 최소한의 안전 보험입니다!"),
+        ("QA매니저 강혜원", "Quality Assurance Lead", "더 큰 문제는 데이터 정확도입니다. 고객사 매뉴얼의 HWP 한글 문서 내 '표(Table)' 구조를 파싱할 때 RAG 오인식률이 현재 18%에 달합니다. 18% 확률로 AI가 잘못된 환불 규정을 읽어서 50만원짜리 오환불을 남발하면 그 재정적 손실과 고객 불만을 어떻게 감당합니까?"),
+        ("셀러대표 민경아", "Seller Representative", "잠깐만요! RAG 오인식으로 잘못 환불된 돈을 입점 셀러인 우리더러 떠안으라는 소리입니까? 50만원 이하라고 셀러 확인도 없이 제멋대로 돈을 빼내 가다니요! 이런 정산 먹튀 플랫폼이라면 당장 저희 셀러 연합 450개 업체가 일제히 탈퇴하고 경쟁사로 이탈하겠습니다. 법적 소송도 불사할 것입니다!"),
+        ("CFO 정우진", "Financial Director", "민경아 대표님 지적이 백번 맞습니다. 잘못 환불된 대금을 플랫폼 재무 재원으로 보전해주기 시작하면 당사 재무 리스크가 걷잡을 수 없이 커집니다. 차라리 자율 환불 임계 한도를 50만원이 아니라 1만원 수준으로 대폭 축소하는 게 유일한 안전장치입니다."),
+        ("영업팀장 오세현", "B2B Sales Lead", "정 이사님! 한도를 1만원으로 낮추면 대형 바이어들이 'CS 자동화 효과가 전혀 없다'며 즉시 도입을 철회합니다. B2B 시장에서 50만원 임계값은 경쟁사 대비 독점적 우위를 확보하는 유일한 무기인데, 이걸 버리라는 건 영업 접고 사업 접으라는 소리입니다!"),
+        ("셀러대표 민경아", "Seller Representative", "오팀장님 실적 채우자고 우리 피 같은 정산금을 담보로 삼으라는 겁니까? 최종 정산 및 환불 집행 승인 권한은 법적 거래 주체인 셀러에게 최종 귀속되어야 합니다. 그렇지 않으면 단 하루도 MiroFish 플랫폼에 물건을 올리지 않겠습니다!"),
+        ("아키텍트 박팀장", "Lead Architect", "보안 필터 오버헤드, RAG 표 파싱 환각, 재무 적자, 그리고 셀러 이탈 리스크까지 첩첩산중이군요. 완벽한 교착 상태입니다. PM님, 이 상태로는 개발도, 배포도 불가능합니다. 특단의 돌파구가 필요합니다."),
+        ("PM 김철수", "Product Manager", "모두 진정하십시오. 해결책이 있습니다. AI 신뢰도 판정 점수가 87% 미만이거나 환불 청구액이 10만원을 초과하는 거래는 AI가 자동 처리하지 않고, 실시간으로 분석 근거를 추출해 'HITL(Human-in-the-Loop) 승인 대기 큐'로 넘기는 절충안을 제안합니다. 최종 자율 한도는 50만원을 수호하되 안전 필터를 이중화하는 것입니다."),
+        ("디자이너 정희채", "UI/UX Designer", "그 아이디어 좋습니다! AI가 수집한 증빙 자료와 HWP 표 분석 요약을 3초 만에 검토할 수 있는 원클릭 스마트폰 알림톡 위젯 UI를 개발하겠습니다. 셀러나 상담원이 클릭 한 번으로 최종 승인하게 만들면 검토 오버헤드를 최소화하면서 거래 권한을 보장할 수 있습니다."),
+        ("셀러대표 민경아", "Seller Representative", "음, AI가 찾아낸 요약 보고서를 보고 우리가 직접 최종 터치를 해야만 돈이 나간다면 안심할 수 있겠네요. 3초 검토 방식이라면 장사 바쁜 와중에도 시간도 거의 안 뺏기고 납득할 만합니다. 찬성합니다."),
+        ("법무팀장 최윤서", "Legal Counsel", "최종 인출 주체를 AI가 아닌 인간(셀러)으로 격리하면 AI 오작동에 따른 플랫폼 면책 조항 계약이 성립됩니다. 법무팀에서도 이 조건이라면 배상 책임 리스크가 대부분 해소되므로 정식 승인을 낼 수 있습니다."),
+        ("아키텍트 박팀장", "Lead Architect", "기술적 리스크를 완화하기 위해 본 가동 전 4주간 'Shadow Mode(섀도우 테스트)' 단계를 정식 개발 로드맵에 반영합시다. 실제 DB 정산 취소는 막아둔 채, 백그라운드에서 실데이터 트래픽을 흘려 PII 필터 레이턴시와 RAG 정확도 통계를 실측 튜닝하는 완충 기간을 갖는 겁니다."),
+        ("프론트 한아름", "Frontend Engineer", "4주 섀도우 기간이 확보되면 화면 렉에 대한 UI 트릭을 적용하겠습니다. PII 필터 구동 시 화면에 '개인정보 안심 마스킹 적용 중...' 이라는 고급 Glassmorphism 스피너와 스켈레톤 애니메이션을 띄워 체감 대기 시간을 극적으로 단축시키고 사용자 이탈을 막겠습니다."),
+        ("QA매니저 강혜원", "Quality Assurance Lead", "섀도우 모드의 4주 실측 데이터를 확보할 수 있다면, HWP 표 파싱 RAG 모델을 집중 미세조정(Fine-Tuning)하여 런칭 시점 환각율을 확실히 3% 미만으로 통제할 수 있습니다. QA 관점에서도 이 로드맵이라면 자신 있게 승인할 수 있습니다!"),
+        ("보안감사관 이지훈", "Security Auditor", "보안실에서도 환영입니다. 4주간의 PII 50ms 필터링 보고서와 Zero-Retention 로깅 검증서를 미리 제출받아 보안성을 통제할 수 있다면, 정식 런칭 전에 금융권 ISMS-P 인증 승인을 사전 취득하는 스케줄이 가능해집니다."),
+        ("SRE리드 한상민", "SRE Lead", "SRE 부서에서도 4주간의 섀도우 모드 동안 로컬 Failover 스위칭 지연 시간을 250ms 이하로 튜닝해내겠습니다. 가상 트래픽 부하 테스트를 병행하여 트래픽 폭증 시의 인프라 스케일링 병목도 완벽히 잡겠습니다."),
+        ("영업팀장 오세현", "B2B Sales Lead", "좋습니다! 4주간 검증된 신뢰도 통계와 ISMS-P 인증서를 세일즈 피치덱에 얹는다면, BMT 기술 심의는 통과한 것이나 다름없습니다. 대기업 3곳과의 25억 계약 클로징도 당장 3분기 내 달성해 내겠습니다!"),
+        ("CS/HR 서진우", "CS & HR Manager", "CS 조직에서도 이 대시보드를 검토하는 상담원들을 'AI 판정 신뢰성 감사관(Auditor)'으로 업스킬링하는 HR 로드맵을 연계하겠습니다. 단순 콜센터 상담사에서 AI 기술 통제관으로 직무가 격상되는 것이니, CS 노조의 구조조정 불안감과 반발을 원천 봉쇄할 수 있습니다!"),
+        ("CFO 정우진", "Financial Director", "직무 업스킬링 비용과 HITL 간편 위젯 UI 개발비를 예산에 공식 반영하더라도, 4주 섀도우 검증 및 25억 딜이 확보된다면 전체 프로젝트 ROI는 35% 이상 흑자로 전환됩니다. 재무 승인 안을 통과시키겠습니다!"),
+        ("PM 김철수", "Product Manager", "팀 여러분, 격렬한 공방과 고밀도 토론 끝에 마스킹 전처리, HITL 대기 큐, 4주 Shadow Mode, 그리고 CS 직무 업스킬링 로드맵을 모두 통합한 완벽한 B2B 자율 대행 PRD의 최종 합의(Consensus)를 이뤘습니다. 정식 출시를 향해 힘차게 전진합시다!")
+    ]
+
+    total_steps = len(dialogues)
     
-    stage3_nodes = ALL_MOCK_NODES[:48]
-    stage3_links = ALL_MOCK_LINKS[:92]
-    
-    stage4_nodes = ALL_MOCK_NODES[:64]
-    stage4_links = ALL_MOCK_LINKS[:122]
-    
-    final_nodes = ALL_MOCK_NODES
-    final_links = ALL_MOCK_LINKS
-    
+    # 실시간 노드/링크 누적 렌더링을 위한 step별 서브셋 구성 헬퍼
+    def get_progress_graph(step_idx):
+        expert_count = len(dynamic_expert_nodes)
+        non_expert_total = len(non_expert_nodes)
+        
+        # 비전문가 노드는 step_idx에 맞춰 점진적 증가
+        visible_non_expert_count = int(non_expert_total * (step_idx + 1) / total_steps)
+        visible_nodes = dynamic_expert_nodes + non_expert_nodes[:visible_non_expert_count]
+        
+        # 링크도 step_idx에 맞춰 점진적 증가
+        visible_link_count = int(len(final_links) * (step_idx + 1) / total_steps)
+        visible_links = final_links[:visible_link_count]
+        
+        return visible_nodes, visible_links
+
+    # 헬퍼 메세지 생성 함수
     def _msg(t, c, n=None, at=None, p=None, nodes=None, links=None):
         data = {"type": t, "content": c, "timestamp": _ts(), "mode": mode}
-        if n: data["agent_name"] = n
-        if at: data["agent_type"] = at
-        if p is not None: data["progress"] = p
-        if nodes: data["nodes"] = nodes
-        if links: data["links"] = links
+        if n: 
+            data["agent_name"] = n
+        if at: 
+            data["agent_type"] = at
+        if p is not None: 
+            data["progress"] = p
+        if nodes: 
+            data["nodes"] = nodes
+        if links: 
+            data["links"] = links
         return f'data: {json.dumps(data)}\n\n'
 
-    # 1단계: 비즈니스 가치 달성 vs CS 운영 조직 저항 (1% - 20%)
+    # 시뮬레이션 최초 가동 시 (전문가 30인 최초 배치 및 초기 링크들 포함)
     yield _msg("system_log", "Initializing High-Density MiroFish Mock Agent Engine v13.0...", p=0.01)
     await asyncio.sleep(0.3)
     
-    yield _msg("graph_update", "Stage 1: Business Vision & HR Resistance Initiated", p=0.05, nodes=stage1_nodes, links=stage1_links)
+    init_nodes, init_links = get_progress_graph(0)
+    yield _msg("graph_update", "Stage 1: Business Vision & HR Resistance Initiated", p=0.05, nodes=init_nodes, links=init_links)
     await asyncio.sleep(0.3)
 
-    yield _msg("agent_post", "이번 Simply AI Agent는 기업용 레거시와 연동하여 주문 조회, 주문 취소, 50만원 이하 자율 환불 액션을 완수해야 합니다. 상담원 개입을 최소화하여 목표 TCR(업무완결율) 40% 이상을 기한 내 달성합시다.", "PM 김철수", "Product Manager", 0.07)
-    await asyncio.sleep(0.8)
+    # 대화 및 그래프 실시간 누적 빌드 루프
+    for idx, (old_speaker, old_role, content) in enumerate(dialogues):
+        prog = 0.05 + (0.90 * (idx + 1) / total_steps)
+        
+        speaker_name, speaker_role = get_actual_persona_name(old_speaker)
+        step_nodes, step_links = get_progress_graph(idx)
+        
+        yield _msg("agent_post", content, speaker_name, speaker_role, prog, nodes=step_nodes, links=step_links)
+        await asyncio.sleep(1.0) # 대화 템포 유지
 
-    yield _msg("agent_post", "김철수 PM님, 현장을 전혀 모르는 안일한 발상입니다! AI가 TCR 40%를 달성하면 기존 CS 상담원들의 직무가 축소될 것이 뻔한데 CS 노조가 가만히 있겠습니까? 당장 내일 아침 본사 로비에서 구조조정 규탄 피켓 시위를 벌이겠다고 강경하게 경고해 왔습니다. 현장 합의 없는 도입은 전면 사보타주만 부를 뿐입니다!", "CS/HR 서진우", "CS & HR Manager", 0.09)
-    await asyncio.sleep(0.8)
-
-    yield _msg("agent_post", "서 매니저님, 지금 노조 시위 때문에 프로젝트를 지연시키자는 겁니까? 이번 6월 BMT(기술검증)를 통과하지 못하면 당장 연간 25억 규모의 대형 고객사 3곳과의 거래 딜이 즉시 무산됩니다. 비즈니스 생존보다 시위 방어가 더 중요합니까?", "영업팀장 오세현", "B2B Sales Lead", 0.11)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "오세현 팀장님, 단기 실적에 눈이 멀어 곪아 터질 폭탄을 방치하는 게 더 위험합니다! 현장 상담원들이 반발해서 RAG 입력 데이터 분류 태그를 엉망으로 입력하거나 고의로 피드백 점수를 흐려놓으면, 전체 AI 응답 정확도가 30% 이하로 곤두박질칠 겁니다. 그때 발생하는 유무형의 신뢰 손실은 25억이 아니라 250억으로도 못 메웁니다!", "CS/HR 서진우", "CS & HR Manager", 0.13)
-    await asyncio.sleep(0.8)
-
-    yield _msg("agent_post", "두 분 싸움보다 더 심각한 컴플라이언스 붕괴 위험이 있습니다. 외부 LLM API 통신 시 계좌번호와 주민번호 같은 개인식별정보(PII) 유출 위험은 치명적입니다. 50ms 이내 초고속 PII 마스킹 차단율 100%와 데이터 미저장(Zero-Retention) 조건이 실측 입증되지 않으면 금융감독원 보안성 심의에서 바로 반려되어 서비스 자체가 셧다운됩니다!", "보안감사관 이지훈", "Security Auditor", 0.16)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "이 감사관님, 50ms 이내 100% 차단은 물리적으로 불가능합니다! API 게이트웨이 전단에 다중 정규식 필터와 검출 모델을 동기식으로 끼워 넣으면 프록시 홉 오버헤드만 최소 600ms가 추가됩니다. 결과적으로 전체 E2E 레이턴시가 목표치인 1.5초를 훌쩍 넘어 2.5초에 달할 텐데, 화면이 렉 걸려 굳어버리는 서비스를 유저가 쓰겠습니까?", "아키텍트 박팀장", "Lead Architect", 0.18)
-    await asyncio.sleep(0.8)
-
-    # 2단계: 보안 감사 및 법률적 규제 검증의 압박 (20% - 45%)
-    yield _msg("graph_update", "Stage 2: Regulatory & Legal Constraints Addressed", p=0.20, nodes=stage2_nodes, links=stage2_links)
+    # 5단계: 최종 합의 마무리
+    final_visible_nodes, final_visible_links = final_nodes, final_links
+    yield _msg("graph_update", "Stage 5: High-Density Mesh Graph & Final consensus Completed", p=0.95, nodes=final_visible_nodes, links=final_visible_links)
     await asyncio.sleep(0.3)
-
-    yield _msg("agent_post", "맞습니다! 동기식 전처리 필터링이 연동되면 화면이 3초 이상 멈춰 서게 되고, 답답한 사용자들이 새로고침을 연타해서 API 커넥션이 폭증하고 웹소켓 서버가 크래시 날 겁니다. 속도가 무너진 보안은 사용자 이탈만 초래하는 UX 파괴일 뿐입니다!", "프론트 한아름", "Frontend Engineer", 0.22)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "한아름 엔지니어님, 화면 렉보다 금융 컴플라이언스 위반으로 인한 영업정지 처분과 과징금 10억원이 훨씬 치명적입니다! 보안 필터링은 타협 불가능한 절대 의무입니다. 기술적 어려움은 엔지니어링 리소스를 갈아 넣어서라도 50ms 기준을 지켜내야 할 영역입니다!", "보안감사관 이지훈", "Security Auditor", 0.25)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "보안뿐만 아니라 책임 귀속도 엉망입니다. AI 판단 오작동으로 50만원 이하 자율 환불이 잘못 집행되어 대금이 무단 유출되었을 때, 그 귀책사유와 민사상 배상 책임 기준이 PRD에 전혀 명시되어 있지 않습니다. 인간이 최종 통제하는 승인 대기 큐(HITL)가 차단 장치로 강제되지 않는다면, 법무팀은 배상 계약 조항에 절대 승인 도장을 찍을 수 없습니다!", "법무팀장 최윤서", "Legal Counsel", 0.28)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "재무 관점에서도 이 사업은 전면 보류해야 합니다. 박팀장님이 설계하신 PII 필터용 프록시 서버 이중화 구성과 고성능 전처리 LLM 호출 토큰 비용을 계산해보니 API 비용만 월 1,800만원이 찍힙니다. 기존 CS 인력 감축에 따른 운영비 절감액 1,100만원을 훌쩍 초과하는데, 배보다 배꼽이 더 큰 적자 프로젝트를 왜 승인해야 합니까?", "CFO 정우진", "Financial Director", 0.31)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "더 큰 문제는 데이터 정확도입니다. 고객사 매뉴얼의 HWP 한글 문서 내 '표(Table)' 구조를 파싱할 때 RAG 오인식률이 현재 18%에 달합니다. 18% 확률로 AI가 잘못된 환불 규정을 읽어서 50만원짜리 오환불을 남발하면 그 재정적 손실과 고객 불만을 어떻게 감당합니까?", "QA매니저 강혜원", "Quality Assurance Lead", 0.34)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "잠깐만요! RAG 오인식으로 잘못 환불된 돈을 입점 셀러인 우리더러 떠안으라는 소리입니까? 50만원 이하라고 셀러 확인도 없이 제멋대로 돈을 빼내 가다니요! 이런 정산 먹튀 플랫폼이라면 당장 저희 셀러 연합 450개 업체가 일제히 탈퇴하고 경쟁사로 이탈하겠습니다. 법적 소송도 불사할 것입니다!", "셀러대표 민경아", "Seller Representative", 0.37)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "민경아 대표님 지적이 백번 맞습니다. 잘못 환불된 대금을 플랫폼 재무 재원으로 보전해주기 시작하면 당사 재무 리스크가 걷잡을 수 없이 커집니다. 차라리 자율 환불 임계 한도를 50만원이 아니라 1만원 수준으로 대폭 축소하는 게 유일한 안전장치입니다.", "CFO 정우진", "Financial Director", 0.40)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "정 이사님! 한도를 1만원으로 낮추면 대형 바이어들이 'CS 자동화 효과가 전혀 없다'며 즉시 도입을 철회합니다. B2B 시장에서 50만원 임계값은 경쟁사 대비 독점적 우위를 확보하는 유일한 무기인데, 이걸 버리라는 건 영업 접고 사업 접으라는 소리입니다!", "영업팀장 오세현", "B2B Sales Lead", 0.43)
-    await asyncio.sleep(0.8)
-
-    # 3단계: 비용, QA 신뢰도, 정산 리스크의 충돌 (45% - 70%)
-    yield _msg("graph_update", "Stage 3: Financial Constraints, QA Reliability & Settlement Risks", p=0.45, nodes=stage3_nodes, links=stage3_links)
-    await asyncio.sleep(0.3)
-
-    yield _msg("agent_post", "오팀장님 실적 채우자고 우리 피 같은 정산금을 담보로 삼으라는 겁니까? 최종 정산 및 환불 집행 승인 권한은 법적 거래 주체인 셀러에게 최종 귀속되어야 합니다. 그렇지 않으면 단 하루도 MiroFish 플랫폼에 물건을 올리지 않겠습니다!", "셀러대표 민경아", "Seller Representative", 0.47)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "보안 필터 오버헤드, RAG 표 파싱 환각, 재무 적자, 그리고 셀러 이탈 리스크까지 첩첩산중이군요. 완벽한 교착 상태입니다. PM님, 이 상태로는 개발도, 배포도 불가능합니다. 특단의 돌파구가 필요합니다.", "아키텍트 박팀장", "Lead Architect", 0.50)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "모두 진정하십시오. 해결책이 있습니다. AI 신뢰도 판정 점수가 87% 미만이거나 환불 청구액이 10만원을 초과하는 거래는 AI가 자동 처리하지 않고, 실시간으로 분석 근거를 추출해 'HITL(Human-in-the-Loop) 승인 대기 큐'로 넘기는 절충안을 제안합니다. 최종 자율 한도는 50만원을 수호하되 안전 필터를 이중화하는 것입니다.", "PM 김철수", "Product Manager", 0.53)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "그 아이디어 좋습니다! AI가 수집한 증빙 자료와 HWP 표 분석 요약을 3초 만에 검토할 수 있는 원클릭 스마트폰 알림톡 위젯 UI를 개발하겠습니다. 셀러나 상담원이 클릭 한 번으로 최종 승인하게 만들면 검토 오버헤드를 최소화하면서 거래 권한을 보장할 수 있습니다.", "디자이너 정희채", "UI/UX Designer", 0.56)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "음, AI가 찾아낸 요약 보고서를 보고 우리가 직접 최종 터치를 해야만 돈이 나간다면 안심할 수 있겠네요. 3초 검토 방식이라면 장사 바쁜 와중에도 시간도 거의 안 뺏기고 납득할 만합니다. 찬성합니다.", "셀러대표 민경아", "Seller Representative", 0.59)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "최종 인출 주체를 AI가 아닌 인간(셀러)으로 격리하면 AI 오작동에 따른 플랫폼 면책 조항 계약이 성립됩니다. 법무팀에서도 이 조건이라면 배상 책임 리스크가 대부분 해소되므로 정식 승인을 낼 수 있습니다.", "법무팀장 최윤서", "Legal Counsel", 0.62)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "기술적 리스크를 완화하기 위해 본 가동 전 4주간 'Shadow Mode(섀도우 테스트)' 단계를 정식 개발 로드맵에 반영합시다. 실제 DB 정산 취소는 막아둔 채, 백그라운드에서 실데이터 트래픽을 흘려 PII 필터 레이턴시와 RAG 정확도 통계를 실측 튜닝하는 완충 기간을 갖는 겁니다.", "아키텍트 박팀장", "Lead Architect", 0.65)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "4주 섀도우 기간이 확보되면 화면 렉에 대한 UI 트릭을 적용하겠습니다. PII 필터 구동 시 화면에 '개인정보 안심 마스킹 적용 중...' 이라는 고급 Glassmorphism 스피너와 스켈레톤 애니메이션을 띄워 체감 대기 시간을 극적으로 단축시키고 사용자 이탈을 막겠습니다.", "프론트 한아름", "Frontend Engineer", 0.68)
-    await asyncio.sleep(0.9)
-
-    # 4단계: 극적인 타협안 도출 - HITL 및 Shadow Mode 도입 (70% - 90%)
-    yield _msg("graph_update", "Stage 4: Breakthrough Solutions (HITL Queue & Shadow Testing)", p=0.70, nodes=stage4_nodes, links=stage4_links)
-    await asyncio.sleep(0.3)
-
-    yield _msg("agent_post", "섀도우 모드의 4주 실측 데이터를 확보할 수 있다면, HWP 표 파싱 RAG 모델을 집중 미세조정(Fine-Tuning)하여 런칭 시점 환각율을 확실히 3% 미만으로 통제할 수 있습니다. QA 관점에서도 이 로드맵이라면 자신 있게 승인할 수 있습니다!", "QA매니저 강혜원", "Quality Assurance Lead", 0.72)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "보안실에서도 환영입니다. 4주간의 PII 50ms 필터링 보고서와 Zero-Retention 로깅 검증서를 미리 제출받아 보안성을 통제할 수 있다면, 정식 런칭 전에 금융권 ISMS-P 인증 승인을 사전 취득하는 스케줄이 가능해집니다.", "보안감사관 이지훈", "Security Auditor", 0.75)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "좋습니다! 4주간 검증된 신뢰도 통계와 ISMS-P 인증서를 세일즈 피치덱에 얹는다면, BMT 기술 심의는 통과한 것이나 다름없습니다. 대기업 3곳과의 25억 계약 클로징도 당장 3분기 내 달성해 내겠습니다!", "영업팀장 오세현", "B2B Sales Lead", 0.78)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "CS 조직에서도 이 대시보드를 검토하는 상담원들을 'AI 판정 신뢰성 감사관(Auditor)'으로 업스킬링하는 HR 로드맵을 연계하겠습니다. 단순 콜센터 상담사에서 AI 기술 통제관으로 직무가 격상되는 것이니, CS 노조의 구조조정 불안감과 반발을 원천 봉쇄할 수 있습니다!", "CS/HR 서진우", "CS & HR Manager", 0.81)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "직무 업스킬링 비용과 HITL 간편 위젯 UI 개발비를 예산에 공식 반영하더라도, 4주 섀도우 검증 및 25억 딜이 확보된다면 전체 프로젝트 ROI는 35% 이상 흑자로 전환됩니다. 재무 승인 안을 통과시키겠습니다!", "CFO 정우진", "Financial Director", 0.84)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "팀 여러분, 격렬한 공방과 고밀도 토론 끝에 마스킹 전처리, HITL 대기 큐, 4주 Shadow Mode, 그리고 CS 직무 업스킬링 로드맵을 모두 통합한 완벽한 B2B 자율 대행 PRD의 최종 합의(Consensus)를 이뤘습니다. 정식 출시를 향해 힘차게 전진합시다!", "PM 김철수", "Product Manager", 0.87)
-    await asyncio.sleep(0.9)
-
-    # 5단계: 합의 도달 및 최종 로드맵 확정 (90% - 100%)
-    yield _msg("graph_update", "Stage 5: High-Density Mesh Graph & Final consensus Completed", p=0.90, nodes=final_nodes, links=final_links)
-    await asyncio.sleep(0.3)
-
-    yield _msg("agent_post", "QA팀 관점에서도 Shadow Mode 실측 기간이 있다면 무결한 검증이 가능합니다! RAG의 HWP 표 파싱 정확도와 할루시네이션 분포 통계를 4주간 실데이터로 보강 튜닝하여, 런칭 전 환각율 3% 미만을 QA 보증하겠습니다.", "QA매니저 강혜원", "Quality Assurance Lead", 0.92)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "보안실에서도 대환영입니다. 4주 모의 가동 동안 PII 50ms 미만 전처리율과 Zero-Retention 데이터 미저장 로그 보고서를 감사하여 ISMS-P 인증 승인을 미리 발급해 두겠습니다.", "보안감사관 이지훈", "Security Auditor", 0.94)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "이 4주 검증 통계와 보안 감사 완료 보고서가 나오면 B2B 영업 BMT 기술 심의를 획기적으로 무력화해, 런칭 즉시 3곳 이상의 대기업 딜 클로징을 달성해 내겠습니다.", "영업팀장 오세현", "B2B Sales Lead", 0.96)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "현장 CS 상담원들도 이 대시보드를 검토자로 사용하는 'AI 판정 감사관(Auditor)'으로 점진적 역할 전환 및 내부 교육(Upskilling)을 연계하겠습니다. CS 노조의 구조조정 반발을 원천 봉쇄할 수 있는 훌륭한 HR 카드입니다.", "CS/HR 서진우", "CS & HR Manager", 0.98)
-    await asyncio.sleep(1.0)
-
-    yield _msg("agent_post", "서 매니저님의 교육 리소스비, 정희채 디자이너님의 모바일 HITL 위젯 개발 공수, 그리고 SRE의 로컬 failover Ollama 자원비를 모두 공식 PRD 예산안에 태워 승인하겠습니다. 비용 30%ROI가 무결하게 달성되겠네요.", "CFO 정우진", "Financial Director", 0.99)
-    await asyncio.sleep(0.9)
-
-    yield _msg("agent_post", "팀 여러분, 격렬한 공방과 고밀도 토론 끝에 마스킹 전처리, HITL 대기 큐, 4주 Shadow Mode 및 CS 직무 업스킬링 로드맵을 모두 통합한 완벽한 B2B 자율 대행 PRD의 최종 합의(Consensus)를 이뤘습니다. 정식 출시를 향해 나아갑시다!", "PM 김철수", "Product Manager", 0.99)
-    await asyncio.sleep(0.6)
     
-    yield _msg("system_log", "Mock Agent Swarm consensus reached. Mesh graph populated with 77 nodes and 154 edges.", p=1.0)
+    yield _msg("system_log", f"Mock Agent Swarm consensus reached. Mesh graph populated with {len(final_visible_nodes)} nodes and {len(final_visible_links)} edges.", p=1.0)
     await asyncio.sleep(0.3)
-    yield _msg("simulation_complete", "All 12 stakeholder agents have reached a rigorous architectural and operational consensus.")
+    yield _msg("simulation_complete", "All 30+ stakeholder agents have reached a rigorous architectural and operational consensus.")
+
+
 
 @router.get("/stream")
 async def stream_simulation():
@@ -797,19 +1112,21 @@ async def _report_event_generator():
     await asyncio.sleep(1.0)
 
     markdown = """# 📊 MiroFish 시뮬레이션 검증 보고서
-    
+
 ## 1. 핵심 리스크 및 잠재적 취약점 (Top Risks)
-- 🔒 **데이터 프라이버시 우려 (Data Privacy Concern)**: B2B 고객사(이영희 대표)는 입력된 사내 기밀 및 프롬프트가 외부 LLM 학습에 활용될 수 있다는 치명적 우려를 제기하였습니다.
-- ⚙️ **기능 설계 대비 공수 증가 (Scope Creep)**: FR-02(구조화된 데이터 추출)에 사용자 톤앤매너 스타일 가이드를 직접 결합하면서 기술적 복잡도가 상승하고 개발 일정이 20% 이상 지연될 위험이 감지되었습니다.
-- 📉 **실질적 가치 훼손 가능성 (UX Friction)**: 생성된 PRD가 회사 가이드라인과 100% 매칭되지 않을 경우, 현업 사용자가 수동으로 대량 편집을 가해야 하므로 '30분 내 초안 완성'이라는 제품의 본질적 가치 제안이 훼손될 수 있습니다.
+- 🔒 **개인식별정보(PII) 유출 및 레이턴시 병목**: 외부 LLM 호출 시 민감정보 유출 우려 및 동기식 PII 필터 적용으로 인한 E2E 레이턴시 상승 리스크.
+- 💸 **자율 환불 권한 이관에 따른 재무/법적 리스크**: 50만원 이하 자율 환불의 오작동 및 셀러 연합의 정산 먹튀 불안감으로 인한 대규모 이탈 위험.
+- 📉 **HWP 표 파싱 오류 및 RAG 할루시네이션**: 매뉴얼 문서 표 구조 인식 불안정(오인식률 18%)으로 인한 잘못된 환불 규정 해석 위험.
+- 👥 **상담 조직의 직무 불안 및 반발**: 자동화율 40% 도달 시 기존 상담 조직의 구조조정 우려에 따른 반발 및 사보타주 리스크.
 
 ## 2. 해결 방안 및 권장 설계 조정 (Proposed Solutions)
-- **Zero-Retention API 및 PII 마스킹 레이어 도입**: B2B 고객의 보안 불신을 종식시키기 위해 데이터 미보존 처리 및 개인식별정보(PII) 난독화 레이어를 설계서에 긴급 명시합니다.
-- **RAG 기반 톤 메모리 아키텍처 적용**: 비용 증가와 과도한 파인튜닝 없이 고품질 맞춤형 톤을 구현할 수 있도록, 기존 사용자의 고품질 문서를 검색 증강 생성(RAG) 방식으로 참고하게 설계합니다.
-- **참고 문서 업로드 UI 추가**: UI/UX Designer(정희채)의 의견을 수용하여, 대화창 내에 사내 스타일 가이드를 자유롭게 Drag & Drop하여 주입할 수 있는 UI를 MVP 범위에 추가합니다.
+- **PII 난독화 필터 및 Ollama Failover 도입**: 50ms 이내 초고속 PII 마스킹 레이어를 적용하고 외부 LLM 장애 대응을 위한 300ms 로컬 Failover 프록시 구성.
+- **HITL 승인 대기 큐 및 원클릭 셀러 승인 UI**: 신뢰도 85% 미만 혹은 단일 거래 50만원 초과 시 처리를 유예하고 관리자/셀러용 'HITL 대기 큐' 위젯으로 이관.
+- **RAG 표 파싱 고도화 및 4주 Shadow Mode 검증**: 9월 런칭 전 4주간 백그라운드 섀도우 테스트를 정식 로드맵에 반영하여 실측 데이터 튜닝 및 환각율 3% 미만 통제.
+- **상담 조직의 AI 신뢰성 감사관 업스킬링**: CS 인력을 AI 판정 감사관으로 직무 격상하는 HR 로드맵 연계로 노조 갈등 원천 해소.
 
 ## 3. 최종 권장 사항 (Final Recommendations)
-- 본 프로젝트는 보안 및 RAG 적용 여부에 따라 도입 여부가 결정되므로, 다음 스프린트에서 **보안 레이어 설계 완료** 및 **RAG 프로토타입 작성**을 최우선 Task로 승격할 것을 강력히 권고합니다.
+- 본 프로젝트의 성공적 배포를 위해 **4주간의 Shadow Mode 모의 검증 인프라 및 실시간 성능 모니터링 대시보드 구축**과 **HITL 관리자 UI 위젯 개발**을 최우선 스프린트 과제로 추진할 것을 강력히 권고합니다.
 """
     yield _msg({"type": "report_complete", "markdown": markdown})
 
@@ -1161,10 +1478,16 @@ async def quick_start_simulation(body: QuickStartRequest):
       }
     }
 
+    # 1.5. Render and inject markdown into prd artifacts for instant UI preview
+    from app.services.markdown_renderer import render_prd_markdown
+    rich_prd["artifacts"] = {
+        "prd_markdown": render_prd_markdown(rich_prd)
+    }
+
     # 2. Save complete state directly to session store
     state = session_store.get_session(body.session_id)
     if state is None:
-        state = SessionState(session_id=body.session_id, project_id=body.project_id)
+        state = SessionState(session_id=body.session_id)
     
     state.turn_count = 5
     state.phase = "ready_for_validation"

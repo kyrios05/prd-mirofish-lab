@@ -70,6 +70,8 @@ interface RequestOptions {
   body?: unknown;
   /** Additional headers to merge. */
   headers?: Record<string, string>;
+  /** Abort signal for cancelling the request. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -117,7 +119,7 @@ async function parseErrorResponse(res: Response): Promise<{ message: string; det
  * @throws TypeError on network failure (re-thrown as-is)
  */
 export async function request<T>(options: RequestOptions): Promise<T> {
-  const { method, path, body, headers: extraHeaders } = options;
+  const { method, path, body, headers: extraHeaders, signal } = options;
 
   const url = `${BASE_URL}${path}`;
 
@@ -130,6 +132,7 @@ export async function request<T>(options: RequestOptions): Promise<T> {
   const init: RequestInit = {
     method,
     headers,
+    signal,
     // Only attach a body for methods that support it
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   };
@@ -153,8 +156,8 @@ export async function request<T>(options: RequestOptions): Promise<T> {
 // Convenience wrappers (used by domain API modules)
 // ---------------------------------------------------------------------------
 
-export const get = <T>(path: string): Promise<T> =>
-  request<T>({ method: 'GET', path });
+export const get = <T>(path: string, signal?: AbortSignal): Promise<T> =>
+  request<T>({ method: 'GET', path, signal });
 
-export const post = <T>(path: string, body?: unknown): Promise<T> =>
-  request<T>({ method: 'POST', path, body });
+export const post = <T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> =>
+  request<T>({ method: 'POST', path, body, signal });

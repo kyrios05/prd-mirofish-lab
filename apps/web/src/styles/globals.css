@@ -2,24 +2,24 @@
    globals.css — T08 global styles, CSS variables, dark mode
    ============================================================ */
 
-/* ── CSS Variables (Light theme) ──────────────────────────── */
-:root {
+/* ── CSS Variables (Default Black Theme) ───────────────────── */
+:root, html[data-theme="black"] {
   /* Layout */
   --header-height: 56px;
   --footer-height: 52px;
   --panel-gap: 0px;
 
   /* Colors — neutral */
-  --bg-app: #f0f2f5;
-  --bg-panel: #ffffff;
-  --bg-panel-header: #f8fafc;
-  --border: #e2e8f0;
-  --border-focus: #3b82f6;
+  --bg-app: #090d16;
+  --bg-panel: #0e1524;
+  --bg-panel-header: #1a2744;
+  --border: #334155;
+  --border-focus: #60a5fa;
 
   /* Text */
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
   --text-inverse: #ffffff;
 
   /* Phase badge colors */
@@ -41,14 +41,14 @@
   --color-info: #3b82f6;
 
   /* Chat bubbles */
-  --bubble-user-bg: #3b82f6;
-  --bubble-user-text: #ffffff;
-  --bubble-assistant-bg: #f1f5f9;
-  --bubble-assistant-text: #1e293b;
+  --bubble-user-bg: #2563eb;
+  --bubble-user-text: #f8fafc;
+  --bubble-assistant-bg: #1e293b;
+  --bubble-assistant-text: #e2e8f0;
 
   /* Shadows */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.10);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.20);
 
   /* Radius */
   --radius-sm: 6px;
@@ -60,24 +60,58 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 }
 
-/* ── Dark theme ───────────────────────────────────────────── */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-app: #0f172a;
-    --bg-panel: #1e293b;
-    --bg-panel-header: #1a2744;
-    --border: #334155;
-    --border-focus: #60a5fa;
+/* ── Deep Ocean Theme (Cyber Aqua) ─────────────────────────── */
+html[data-theme="ocean"] {
+  --bg-app: #040f16;
+  --bg-panel: #0b1d28;
+  --bg-panel-header: #0f2e3e;
+  --border: #183e54;
+  --border-focus: #06b6d4;
 
-    --text-primary: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
+  --text-primary: #e0f2fe;
+  --text-secondary: #7dd3fc;
+  --text-muted: #38bdf8;
 
-    --bubble-user-bg: #2563eb;
-    --bubble-user-text: #f8fafc;
-    --bubble-assistant-bg: #334155;
-    --bubble-assistant-text: #e2e8f0;
-  }
+  --bubble-user-bg: #0891b2;
+  --bubble-user-text: #ffffff;
+  --bubble-assistant-bg: #15303f;
+  --bubble-assistant-text: #e0f2fe;
+}
+
+/* ── Midnight Aurora Theme ─────────────────────────────────── */
+html[data-theme="aurora"] {
+  --bg-app: #0a0616;
+  --bg-panel: #130b29;
+  --bg-panel-header: #211347;
+  --border: #311d6b;
+  --border-focus: #a855f7;
+
+  --text-primary: #faf5ff;
+  --text-secondary: #e9d5ff;
+  --text-muted: #c084fc;
+
+  --bubble-user-bg: #7c3aed;
+  --bubble-user-text: #ffffff;
+  --bubble-assistant-bg: #221447;
+  --bubble-assistant-text: #f3e8ff;
+}
+
+/* ── Warm Slate & Sand Theme ───────────────────────────────── */
+html[data-theme="sand"] {
+  --bg-app: #f1f3f5;
+  --bg-panel: #ffffff;
+  --bg-panel-header: #f8f9fa;
+  --border: #dee2e6;
+  --border-focus: #495057;
+
+  --text-primary: #212529;
+  --text-secondary: #495057;
+  --text-muted: #868e96;
+
+  --bubble-user-bg: #343a40;
+  --bubble-user-text: #ffffff;
+  --bubble-assistant-bg: #f1f3f5;
+  --bubble-assistant-text: #212529;
 }
 
 /* ── Reset ────────────────────────────────────────────────── */

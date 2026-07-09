@@ -3,15 +3,21 @@ version: "3.9"
 services:
   api:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./apps/api/Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - DEBUG=false
-      - MIROFISH_BASE_URL=http://mirofish:9000
+      - DEBUG=true
+      - MIROFISH_BASE_URL=http://host.docker.internal:5001
+      - MIROFISH_MODE=live
+    env_file:
+      - ./apps/api/.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./apps/api/app:/app/app
+      - ./PRD_SCHEMA.json:/app/PRD_SCHEMA.json
     restart: unless-stopped
 
   web:
@@ -19,7 +25,7 @@ services:
       context: ./apps/web
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3000:80"
     depends_on:
       - api
     restart: unless-stopped

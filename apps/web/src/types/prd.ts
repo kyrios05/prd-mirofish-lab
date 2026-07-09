@@ -23,7 +23,12 @@ export type ConversationPhase =
   | 'interviewing'
   | 'reviewing'
   | 'ready_for_validation'
-  | 'validated';
+  | 'validated'
+  | 'simulation_setup'
+  | 'simulating'
+  | 'simulation_result'
+  | 'report_generating'
+  | 'report_complete';
 
 // ---------------------------------------------------------------------------
 // PRD completeness

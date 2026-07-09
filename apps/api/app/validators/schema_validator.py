@@ -49,17 +49,21 @@ import jsonschema
 from jsonschema import Draft7Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
-# ---------------------------------------------------------------------------
-# Schema path resolution
-# ---------------------------------------------------------------------------
-# Walk up from this file to the repo root, then locate PRD_SCHEMA.json.
-# Layout:  apps/api/app/validators/schema_validator.py
-#          apps/api/app/
-#          apps/api/
-#          apps/
-#          <repo_root>/PRD_SCHEMA.json
-_REPO_ROOT: Path = Path(__file__).resolve().parents[4]
-PRD_SCHEMA_PATH: Path = _REPO_ROOT / "PRD_SCHEMA.json"
+# Walk up from this file to locate PRD_SCHEMA.json.
+# In production/Docker:  /app/PRD_SCHEMA.json
+# In development:       <repo_root>/PRD_SCHEMA.json
+def _find_schema_path() -> Path:
+    current = Path(__file__).resolve()
+    # Check current and parents for PRD_SCHEMA.json
+    for parent in current.parents:
+        candidate = parent / "PRD_SCHEMA.json"
+        if candidate.exists():
+            return candidate
+    # Fallback to current behavior or a known fixed path if not found
+    # (keeps the code from crashing even if file is missing during module load)
+    return current.parents[1] / "PRD_SCHEMA.json"
+
+PRD_SCHEMA_PATH: Path = _find_schema_path()
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +147,21 @@ def get_validator() -> Draft7Validator:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+def sanitize_prd_dict(prd: dict[str, Any]) -> None:
+    """In-place sanitization of common schema drifts or LLM hallucinations.
+    
+    If 'product.stage' is set to 'planning' (which is not in the official
+    PRD_SCHEMA.json ProductStage enum), normalize it to 'idea'.
+    """
+    if not isinstance(prd, dict):
+        return
+    product = prd.get("product")
+    if isinstance(product, dict):
+        stage = product.get("stage")
+        if stage == "planning":
+            product["stage"] = "idea"
+
+
 def validate_prd(payload: dict[str, Any]) -> ValidationReport:
     """
     Validate a raw PRD payload dict against PRD_SCHEMA.json.
@@ -173,6 +192,9 @@ def validate_prd(payload: dict[str, Any]) -> ValidationReport:
       ``summary``) will be reported as invalid here, even though Pydantic
       would accept it via default_factory.
     """
+    # Auto-sanitize schema-breaking common values
+    sanitize_prd_dict(payload)
+
     validator = get_validator()
 
     raw_errors: list[ValidationError] = sorted(

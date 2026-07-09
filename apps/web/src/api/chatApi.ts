@@ -64,8 +64,16 @@ export async function getSessionStatus(
  *
  * @throws ApiError(404) if session not found
  */
-export async function sendMessage(req: ChatRequest): Promise<ChatResponse> {
-  return post<ChatResponse>('/chat/message', req);
+export async function sendMessage(req: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
+  return post<ChatResponse>('/chat/message', req, signal);
+}
+
+export async function performAction(sessionId: string, actionId: string, payload?: any, signal?: AbortSignal): Promise<ChatResponse> {
+  return post<ChatResponse>('/chat/action', {
+    session_id: sessionId,
+    action_id: actionId,
+    payload
+  }, signal);
 }
 
 // ---------------------------------------------------------------------------
@@ -121,3 +129,24 @@ export async function listCheckpoints(
     `/chat/sessions/${sessionId}/checkpoints`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Quick-start simulation fast-track (Jump to validation/simulation)
+// ---------------------------------------------------------------------------
+
+export interface QuickStartResponse {
+  status: string;
+  phase: string;
+  prd: Record<string, any>;
+}
+
+export async function quickStartSimulation(
+  sessionId: string,
+  projectId: string
+): Promise<QuickStartResponse> {
+  return post<QuickStartResponse>('/simulation/quick-start', {
+    session_id: sessionId,
+    project_id: projectId
+  });
+}
+

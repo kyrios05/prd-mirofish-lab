@@ -2,10 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e .
+COPY apps/api/pyproject.toml .
+COPY PRD_SCHEMA.json .
+RUN pip install --no-cache-dir -e ".[dev]"
 
-COPY app/ ./app/
+COPY apps/api/app/ ./app/
+COPY apps/api/tests/ ./tests/
 
 ENV PYTHONPATH=/app
 ENV PORT=8000

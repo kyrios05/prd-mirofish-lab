@@ -81,6 +81,9 @@ class SessionState:
     phase_history: list[PhaseTransition] = field(default_factory=list)
     """Ordered list of phase transition events (oldest first)."""
 
+    context: dict[str, Any] = field(default_factory=dict)
+    """Session-level generic context for storing simulation state and other integration data."""
+
     @property
     def project_id(self) -> str:
         return f"proj-{self.session_id[:8]}"

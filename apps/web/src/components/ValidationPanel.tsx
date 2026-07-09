@@ -8,79 +8,19 @@
 import { useState } from 'react';
 import type { UseValidationReturn } from '../hooks/useValidation';
 import type { ValidationResult } from '../types/validation';
-import styles from '../styles/validation.module.css';
-
-// ---------------------------------------------------------------------------
-// Result section accordion
-// ---------------------------------------------------------------------------
-
-interface ResultSectionProps {
-  icon: string;
-  title: string;
-  items: string[];
-  /** Optional click handler per item (for recommended_questions) */
-  onItemClick?: (item: string) => void;
-}
-
-function ResultSection({ icon, title, items, onItemClick }: ResultSectionProps) {
-  const [open, setOpen] = useState(true);
-
-  if (items.length === 0) return null;
-
-  return (
-    <div className={styles.resultSection}>
-      <div
-        className={styles.sectionHeader}
-        onClick={() => setOpen((p) => !p)}
-        role="button"
-        aria-expanded={open}
-        tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && setOpen((p) => !p)}
-      >
-        <div className={styles.sectionTitle}>
-          <span className={styles.sectionIcon}>{icon}</span>
-          {title}
-          <span className={styles.sectionCount}>{items.length}</span>
-        </div>
-        <span className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`}>▶</span>
-      </div>
-
-      {open && (
-        <div className={styles.sectionBody}>
-          <ul className={styles.resultList}>
-            {items.map((item, i) => (
-              <li
-                key={i}
-                className={`${styles.resultItem} ${onItemClick ? styles.questionItem : ''}`}
-                onClick={onItemClick ? () => onItemClick(item) : undefined}
-                style={{ cursor: onItemClick ? 'pointer' : 'default' }}
-              >
-                <div className={styles.resultBullet} />
-                {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
+import { Box, Button, Accordion, Alert, Text, Badge, Group, ScrollArea, Center, Stack, List, Progress } from '@mantine/core';
 
 // ---------------------------------------------------------------------------
 // ValidationPanel
 // ---------------------------------------------------------------------------
 
 interface ValidationPanelProps {
-  /** From useValidation() hook */
   validation: UseValidationReturn;
-  /** PRD data from the latest chat response */
   prd: Record<string, unknown> | null;
-  /** Project id (derived from sessionId) */
   projectId: string | null;
-  /** draft_status from the latest chat response */
   draftStatus: string;
-  /** Callback to inject a question into the chat input */
   onQuestionClick?: (question: string) => void;
+  onSimulationClick?: () => void;
 }
 
 export function ValidationPanel({
@@ -89,169 +29,328 @@ export function ValidationPanel({
   projectId,
   draftStatus,
   onQuestionClick,
+  onSimulationClick,
 }: ValidationPanelProps) {
   const { validationResponse, isRunning, error, runValidation } = validation;
 
-  const canRun = draftStatus === 'ready_for_validation' && !!prd && !!projectId && !isRunning;
+  const [progressVal, setProgressVal] = useState<number | null>(null);
+  const [progressValMsg, setProgressValMsg] = useState<string>('');
+  
+  const [simulationProgress, setSimulationProgress] = useState<number | null>(null);
+  const [simulationMsg, setSimulationMsg] = useState<string>('');
+
+  const canRun = draftStatus === 'ready_for_validation' && !!prd && !!projectId && !isRunning && progressVal === null;
 
   function handleRun() {
     if (!prd || !projectId) return;
-    void runValidation(projectId, prd);
+    setProgressVal(0);
+    setProgressValMsg('🔍 PRD 구조화 데이터 파싱 및 스키마 유효성 검사 중...');
+    
+    let current = 0;
+    const interval = setInterval(() => {
+      current += 100 / 30; // 3초에 100% 도달
+      if (current >= 100) {
+        clearInterval(interval);
+        setProgressVal(null);
+        setProgressValMsg('');
+        void runValidation(projectId, prd);
+      } else {
+        setProgressVal(Math.min(current, 99));
+        if (current > 70) {
+          setProgressValMsg('📊 검증 결과 리포트 및 지표 정적 매칭 생성 중...');
+        } else if (current > 35) {
+          setProgressValMsg('⚖️ 12대 부서 비즈니스 정합성 및 RAG 매뉴얼 정합성 정밀 분석 중...');
+        }
+      }
+    }, 100);
+  }
+
+  function handleSimulate() {
+    if (!onSimulationClick) return;
+    setSimulationProgress(0);
+    setSimulationMsg('🚀 MiroFish 시뮬레이션 환경 초기화 중...');
+    
+    let current = 0;
+    const interval = setInterval(() => {
+      current += 100 / 30; // 3초에 100% 도달
+      if (current >= 100) {
+        clearInterval(interval);
+        setSimulationProgress(null);
+        setSimulationMsg('');
+        onSimulationClick();
+      } else {
+        setSimulationProgress(Math.min(current, 99));
+        if (current > 70) {
+          setSimulationMsg('🕸️ 메시 에이전트 스웜(Swarm) 네트워크 채널 개방 중...');
+        } else if (current > 40) {
+          setSimulationMsg('🧬 30인의 전문가 페르소나 및 지식 그래프 토폴로지 구성 중...');
+        }
+      }
+    }, 100);
   }
 
   const result: ValidationResult | null = validationResponse?.result ?? null;
   const schemaErrors = validationResponse?.schema_errors ?? [];
 
+  // Show simulation button if validation is completed and we have result
+  const showSimulationBtn = validationResponse?.status === 'completed' && !!result;
+
+  const statusColors: Record<string, string> = {
+    completed: 'green',
+    schema_invalid: 'red',
+    failed: 'red',
+    pending: 'yellow',
+  };
+
   return (
-    <div className={styles.panel}>
-      {/* Panel header */}
-      <div className={styles.panelHeader}>
-        <span className={styles.panelTitle}>🔬 Validation</span>
-        {validationResponse && (
-          <span
-            style={{
-              fontSize: '0.72rem',
-              fontWeight: 600,
-              padding: '0.15rem 0.5rem',
-              borderRadius: 10,
-              background:
-                validationResponse.status === 'completed'
-                  ? '#d1fae5'
-                  : validationResponse.status === 'schema_invalid'
-                  ? '#fee2e2'
-                  : '#fef3c7',
-              color:
-                validationResponse.status === 'completed'
-                  ? '#065f46'
-                  : validationResponse.status === 'schema_invalid'
-                  ? '#991b1b'
-                  : '#92400e',
-            }}
-          >
-            {validationResponse.status}
-          </span>
-        )}
-      </div>
-
-      <div className={styles.content}>
-        {/* Run button */}
-        <button
-          className={styles.runBtn}
-          onClick={handleRun}
-          disabled={!canRun}
-          title={
-            draftStatus !== 'ready_for_validation'
-              ? 'PRD가 완성되면 검증을 실행할 수 있습니다.'
-              : !prd
-              ? '먼저 PRD를 작성하세요.'
-              : undefined
-          }
-        >
-          {isRunning ? (
-            <>
-              <div className={styles.spinner} />
-              검증 중…
-            </>
-          ) : (
-            '🚀 Run Validation'
+    <Box style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-panel)' }}>
+      <ScrollArea style={{ flex: 1, padding: '16px' }}>
+        <Stack gap="md">
+          {/* Status badge & title */}
+          {validationResponse && (
+            <Group justify="space-between">
+              <Text size="xs" fw={700} c="dimmed">Validation Status</Text>
+              <Badge color={statusColors[validationResponse.status] ?? 'blue'} variant="light" size="sm">
+                {validationResponse.status}
+              </Badge>
+            </Group>
           )}
-        </button>
 
-        {/* Error */}
-        {error && (
-          <div
-            style={{
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
-              borderRadius: 'var(--radius-md)',
-              padding: '0.75rem',
-              fontSize: '0.825rem',
-              color: '#991b1b',
-            }}
-          >
-            ⚠ {error}
-          </div>
-        )}
-
-        {/* Schema errors */}
-        {schemaErrors.length > 0 && (
-          <div className={styles.errorList}>
-            <div
-              style={{
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                color: '#991b1b',
-                marginBottom: '0.35rem',
-              }}
+          {/* Action Buttons */}
+          <Stack gap="xs">
+            <Button
+              variant="gradient"
+              gradient={{ from: 'indigo', to: 'cyan' }}
+              fullWidth
+              onClick={handleRun}
+              disabled={!canRun || progressVal !== null}
+              loading={isRunning && progressVal === null}
+              loaderProps={{ type: 'dots' }}
+              title={
+                draftStatus !== 'ready_for_validation'
+                  ? 'PRD가 완성되면 검증을 실행할 수 있습니다.'
+                  : !prd
+                  ? '먼저 PRD를 작성하세요.'
+                  : undefined
+              }
             >
-              Schema Errors ({schemaErrors.length})
-            </div>
-            {schemaErrors.map((e, i) => (
-              <div key={i}>
-                <div className={styles.errorItem}>{e.message}</div>
-                {e.path && <div className={styles.errorPath}>@ {e.path}</div>}
-              </div>
-            ))}
-          </div>
-        )}
+              Run Validation
+            </Button>
 
-        {/* Placeholder / no result */}
-        {!result && !isRunning && !error && schemaErrors.length === 0 && (
-          <div className={styles.placeholder}>
-            <div className={styles.placeholderIcon}>
-              {draftStatus === 'ready_for_validation' ? '✅' : '⏳'}
-            </div>
-            <div className={styles.placeholderText}>
-              {draftStatus === 'ready_for_validation'
-                ? '"Run Validation" 버튼을 눌러 검증을 시작하세요.'
-                : '인터뷰를 완료하면 검증이 활성화됩니다.'}
-            </div>
-          </div>
-        )}
+            {progressVal !== null && (
+              <Box mt="2px">
+                <Progress value={progressVal} animated color="cyan" size="sm" />
+                <Text size="10px" c="dimmed" mt={4} ta="center">
+                  {progressValMsg} ({Math.round(progressVal)}%)
+                </Text>
+              </Box>
+            )}
+            
+            {showSimulationBtn && (
+              <>
+                <Button
+                  variant="filled"
+                  color="indigo"
+                  fullWidth
+                  disabled={simulationProgress !== null}
+                  onClick={handleSimulate}
+                >
+                  Simulate in MiroFish
+                </Button>
+                {simulationProgress !== null && (
+                  <Box mt="2px">
+                    <Progress value={simulationProgress} animated color="indigo" size="sm" />
+                    <Text size="10px" c="dimmed" mt={4} ta="center">
+                      {simulationMsg} ({Math.round(simulationProgress)}%)
+                    </Text>
+                  </Box>
+                )}
+              </>
+            )}
+          </Stack>
 
-        {/* Result */}
-        {result && (
-          <>
-            {/* Summary */}
-            <div className={styles.summaryCard}>
-              <p className={styles.summaryText}>{result.summary}</p>
-            </div>
+          {/* Error Alert */}
+          {error && (
+            <Alert color="red" title="검증 에러" radius="md">
+              {error}
+            </Alert>
+          )}
 
-            {/* Accordion sections */}
-            <ResultSection
-              icon="⚠️"
-              title="Top Risks"
-              items={result.top_risks}
-            />
-            <ResultSection
-              icon="❌"
-              title="Missing Requirements"
-              items={result.missing_requirements}
-            />
-            <ResultSection
-              icon="👥"
-              title="Stakeholder Objections"
-              items={result.stakeholder_objections}
-            />
-            <ResultSection
-              icon="✂️"
-              title="Scope Adjustments"
-              items={result.scope_adjustments}
-            />
-            <ResultSection
-              icon="❓"
-              title="Recommended Questions"
-              items={result.recommended_questions}
-              onItemClick={onQuestionClick}
-            />
-            <ResultSection
-              icon="✏️"
-              title="Rewrite Suggestions"
-              items={result.rewrite_suggestions}
-            />
-          </>
-        )}
-      </div>
-    </div>
+          {/* Schema Errors List */}
+          {schemaErrors.length > 0 && (
+            <Alert color="red" title={`Schema Errors (${schemaErrors.length})`} radius="md">
+              <Stack gap="xs">
+                {schemaErrors.map((e, i) => (
+                  <Box key={i}>
+                    <Text size="xs" fw={600} c="red.4">{e.message}</Text>
+                    {e.path && <Text size="10px" c="dimmed">Path: {e.path}</Text>}
+                  </Box>
+                ))}
+              </Stack>
+            </Alert>
+          )}
+
+          {/* Placeholder / No Result */}
+          {!result && !isRunning && !error && schemaErrors.length === 0 && (
+            <Center style={{ minHeight: '120px' }}>
+              <Stack align="center" gap={8} style={{ opacity: 0.5 }}>
+                <Text size="xl">
+                  {draftStatus === 'ready_for_validation' ? '✓' : '...'}
+                </Text>
+                <Text size="xs" ta="center">
+                  {draftStatus === 'ready_for_validation'
+                    ? '"Run Validation" 버튼을 눌러 정적 검증을 시작하세요.'
+                    : '인터뷰를 완료하면 정적 검증이 활성화됩니다.'}
+                </Text>
+              </Stack>
+            </Center>
+          )}
+
+          {/* Validation Result Accordion */}
+          {result && (
+            <Stack gap="sm">
+              {/* Summary Card */}
+              <Alert color="indigo" title="Validation Summary" radius="md" variant="light">
+                <Text size="sm" style={{ lineHeight: 1.5 }}>{result.summary}</Text>
+              </Alert>
+
+              {/* Mantine Accordion */}
+              <Accordion variant="separated" radius="md" styles={{
+                item: {
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.05)'
+                },
+                control: {
+                  padding: '8px 12px',
+                },
+                panel: {
+                  padding: '8px 12px',
+                  background: 'rgba(0, 0, 0, 0.1)',
+                }
+              }}>
+                {result.top_risks.length > 0 && (
+                  <Accordion.Item value="risks">
+                    <Accordion.Control>
+                      <Group gap="xs">
+                        <Text size="xs" fw={700}>Top Risks</Text>
+                        <Badge size="xs" color="yellow" variant="light">{result.top_risks.length}</Badge>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <List size="xs" spacing="xs" style={{ color: '#cbd5e1' }}>
+                        {result.top_risks.map((item, idx) => (
+                          <List.Item key={idx}>{item}</List.Item>
+                        ))}
+                      </List>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                )}
+
+                {result.missing_requirements.length > 0 && (
+                  <Accordion.Item value="missing">
+                    <Accordion.Control>
+                      <Group gap="xs">
+                        <Text size="xs" fw={700}>Missing Requirements</Text>
+                        <Badge size="xs" color="red" variant="light">{result.missing_requirements.length}</Badge>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <List size="xs" spacing="xs" style={{ color: '#cbd5e1' }}>
+                        {result.missing_requirements.map((item, idx) => (
+                          <List.Item key={idx}>{item}</List.Item>
+                        ))}
+                      </List>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                )}
+
+                {result.stakeholder_objections.length > 0 && (
+                  <Accordion.Item value="objections">
+                    <Accordion.Control>
+                      <Group gap="xs">
+                        <Text size="xs" fw={700}>Stakeholder Objections</Text>
+                        <Badge size="xs" color="orange" variant="light">{result.stakeholder_objections.length}</Badge>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <List size="xs" spacing="xs" style={{ color: '#cbd5e1' }}>
+                        {result.stakeholder_objections.map((item, idx) => (
+                          <List.Item key={idx}>{item}</List.Item>
+                        ))}
+                      </List>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                )}
+
+                {result.scope_adjustments.length > 0 && (
+                  <Accordion.Item value="scope">
+                    <Accordion.Control>
+                      <Group gap="xs">
+                        <Text size="xs" fw={700}>Scope Adjustments</Text>
+                        <Badge size="xs" color="cyan" variant="light">{result.scope_adjustments.length}</Badge>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <List size="xs" spacing="xs" style={{ color: '#cbd5e1' }}>
+                        {result.scope_adjustments.map((item, idx) => (
+                          <List.Item key={idx}>{item}</List.Item>
+                        ))}
+                      </List>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                )}
+
+                {result.recommended_questions.length > 0 && (
+                  <Accordion.Item value="questions">
+                    <Accordion.Control>
+                      <Group gap="xs">
+                        <Text size="xs" fw={700}>Recommended Questions</Text>
+                        <Badge size="xs" color="teal" variant="light">{result.recommended_questions.length}</Badge>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <List size="xs" spacing="xs">
+                        {result.recommended_questions.map((item, idx) => (
+                          <List.Item
+                            key={idx}
+                            onClick={onQuestionClick ? () => onQuestionClick(item) : undefined}
+                            style={{
+                              cursor: onQuestionClick ? 'pointer' : 'default',
+                              color: '#38bdf8',
+                              textDecoration: 'underline'
+                            }}
+                          >
+                            {item}
+                          </List.Item>
+                        ))}
+                      </List>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                )}
+
+                {result.rewrite_suggestions.length > 0 && (
+                  <Accordion.Item value="rewrite">
+                    <Accordion.Control>
+                      <Group gap="xs">
+                        <Text size="xs" fw={700}>Rewrite Suggestions</Text>
+                        <Badge size="xs" color="grape" variant="light">{result.rewrite_suggestions.length}</Badge>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <List size="xs" spacing="xs" style={{ color: '#cbd5e1' }}>
+                        {result.rewrite_suggestions.map((item, idx) => (
+                          <List.Item key={idx}>{item}</List.Item>
+                        ))}
+                      </List>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                )}
+              </Accordion>
+            </Stack>
+          )}
+        </Stack>
+      </ScrollArea>
+    </Box>
   );
 }
+

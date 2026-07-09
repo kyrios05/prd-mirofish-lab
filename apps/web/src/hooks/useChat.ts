@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createSession, sendMessage as apiSendMessage } from '../api/chatApi';
+import { createSession, performAction as apiPerformAction, quickStartSimulation } from '../api/chatApi';
 import type { ChatResponse, CreateSessionResponse } from '../types/chat';
 import type { CompletenessInfo, ConversationPhase } from '../types/prd';
 
@@ -52,6 +52,16 @@ export interface UseChatReturn {
   setPendingInput: (text: string) => void;
   /** The pending input value (lifted so ChatPanel can consume) */
   pendingInput: string;
+  /** Perform a specific phase transition action */
+  performAction: (actionId: string, payload?: any) => Promise<void>;
+  /** Cancel the current in-flight message request */
+  cancelMessage: () => void;
+  /** Run fast-track demo jump directly to validation/simulation */
+  quickStart: (projectId: string) => Promise<void>;
+  /** Currently streaming message content (assistant thinking) */
+  streamingMessage: string | null;
+  /** Current thinking status from the LLM */
+  streamingStatus: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +83,11 @@ export function useChat(): UseChatReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingInput, setPendingInput] = useState('');
+  const [streamingMessage, setStreamingMessage] = useState<string | null>(null);
+  const [streamingStatus, setStreamingStatus] = useState<string>('');
+
+  // Abort controller ref to cancel requests
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Prevent double-init in React strict mode
   const initRef = useRef(false);
@@ -105,6 +120,14 @@ export function useChat(): UseChatReturn {
     void init();
   }, []);
 
+  const cancelMessage = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsLoading(false);
+    }
+  }, []);
+
   // ── Send message ─────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(
@@ -122,37 +145,208 @@ export function useChat(): UseChatReturn {
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
+      setStreamingMessage(''); // Start streaming buffer
+      setStreamingStatus('아이디어 분석 중...'); // Initial status
       setError(null);
 
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       try {
-        const response = await apiSendMessage({
-          session_id: sessionId,
-          message: trimmed,
+        // Use Fetch API for streaming (SSE)
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            session_id: sessionId,
+            message: trimmed,
+          }),
+          signal: controller.signal,
         });
 
-        // Add assistant reply
-        const assistantMsg: ChatMessage = {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          content: response.assistant_message,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
+        if (!response.ok) {
+          throw new Error(`Streaming failed: ${response.statusText}`);
+        }
 
-        // Update derived state
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('Response body is null');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          
+          // SSE format: event: name\ndata: json\n\n
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() || '';
+
+          for (const part of parts) {
+            if (!part.trim()) continue;
+            
+            let currentEventType = '';
+            const lines = part.split('\n');
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              if (trimmedLine.startsWith('event:')) {
+                currentEventType = trimmedLine.replace(/^event:\s*/, '').trim();
+              } else if (trimmedLine.startsWith('data:')) {
+                const dataStr = trimmedLine.replace(/^data:\s*/, '').trim();
+                try {
+                  const data = JSON.parse(dataStr);
+
+                  if (currentEventType === 'token') {
+                    setStreamingStatus(''); // Clear status when tokens appear
+                    setStreamingMessage((prev) => (prev || '') + data.text);
+                  } else if (currentEventType === 'status') {
+                    setStreamingStatus(data.text);
+                  } else if (currentEventType === 'done') {
+                    // Add final assistant reply to list
+                    const assistantMsg: ChatMessage = {
+                      id: `a-${Date.now()}`,
+                      role: 'assistant',
+                      content: data.assistant_message,
+                      timestamp: new Date().toISOString(),
+                    };
+                    setMessages((prev) => [...prev, assistantMsg]);
+
+                    // Update derived state
+                    setLatestResponse(data);
+                    setPhase(data.current_phase);
+                    setAvailableActions(data.available_actions);
+                    setCompleteness(data.completeness);
+                    setNextQuestions(data.next_questions || []);
+                  } else if (currentEventType === 'error') {
+                    setError(data.message);
+                  }
+                } catch (parseErr) {
+                  console.error('Failed to parse SSE data:', dataStr, parseErr);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          console.log('Message request cancelled');
+          return;
+        }
+        const msg = err instanceof Error ? err.message : '메시지 전송에 실패했습니다.';
+        setError(msg);
+      } finally {
+        setIsLoading(false);
+        setStreamingMessage(null); // End streaming buffer
+        abortControllerRef.current = null;
+      }
+    },
+    [sessionId, isLoading],
+  );
+
+  // ── Perform action ───────────────────────────────────────────────────────
+
+  const performAction = useCallback(
+    async (actionId: string, payload?: any) => {
+      if (!sessionId || isLoading) return;
+      setIsLoading(true);
+      setError(null);
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const response = await apiPerformAction(sessionId, actionId, payload, controller.signal);
+        
+        // Add assistant reply logic (optional, skip adding if silent action is preferred)
+        if (response.assistant_message) {
+            const assistantMsg: ChatMessage = {
+                id: `a-${Date.now()}`,
+                role: 'assistant',
+                content: response.assistant_message,
+                timestamp: new Date().toISOString(),
+            };
+            setMessages((prev) => [...prev, assistantMsg]);
+        }
+
         setLatestResponse(response);
         setPhase(response.current_phase);
         setAvailableActions(response.available_actions);
         setCompleteness(response.completeness);
         setNextQuestions(response.next_questions);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '메시지 전송에 실패했습니다.';
+        if (err instanceof Error && err.name === 'AbortError') return;
+        const msg = err instanceof Error ? err.message : '액션 수행에 실패했습니다.';
+        setError(msg);
+      } finally {
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      }
+    },
+    [sessionId, isLoading],
+  );
+
+  const quickStart = useCallback(
+    async (projectId: string) => {
+      if (!sessionId || isLoading) return;
+      setIsLoading(true);
+      setError(null);
+      
+      try {
+        const response = await quickStartSimulation(sessionId, projectId);
+        if (response.status === 'success') {
+          // 1. Add instant jump messaging to chat
+          const userMsg: ChatMessage = {
+            id: `u-${Date.now()}`,
+            role: 'user',
+            content: "⚡ [퀵스타트] Simply AI Agent 데모 PRD를 로드하고 즉시 시뮬레이션 단계로 진입합니다.",
+            timestamp: new Date().toISOString()
+          };
+          const assistantMsg: ChatMessage = {
+            id: `a-${Date.now()}`,
+            role: 'assistant',
+            content: "알겠습니다. Simply AI Agent(가칭)의 완결된 B2B 엔터프라이즈 PRD 기획안과 상품개발/현업/C-level/이해관계자 생태계를 어우르는 12인의 다차원 전문가 그룹(PM, 아키텍트, 보안, 법무, CFO, QA, DevOps, 디자이너, 프론트엔드, 영업, CS/HR, 셀러대표)을 세션에 성공적으로 로드했습니다! 이제 정적 검증 및 시뮬레이션을 즉시 실행하실 수 있습니다.",
+            timestamp: new Date().toISOString()
+          };
+          
+          setMessages((prev) => [...prev, userMsg, assistantMsg]);
+          
+          // 2. Mock a full successful ChatResponse to trigger reactive updates in all panels
+          const mockChatResponse: ChatResponse = {
+            session_id: sessionId,
+            assistant_message: assistantMsg.content,
+            structured_prd: response.prd,
+            prd_markdown: (response.prd.artifacts && typeof response.prd.artifacts === 'object' && 'prd_markdown' in response.prd.artifacts) 
+              ? (response.prd.artifacts.prd_markdown as string) 
+              : "## Simply AI Agent PRD",
+            draft_status: 'ready_for_validation',
+            completeness: {
+              filled: ['product', 'users', 'problem', 'solution', 'scope', 'requirements', 'success_metrics', 'delivery', 'assumptions', 'risks', 'open_questions', 'validation'],
+              missing: [],
+              progress: 1.0
+            },
+            next_questions: [],
+            current_phase: response.phase as ConversationPhase,
+            available_actions: ['run_validation', 'save_checkpoint']
+          };
+          
+          setLatestResponse(mockChatResponse);
+          setPhase(response.phase as ConversationPhase);
+          setAvailableActions(mockChatResponse.available_actions);
+          setCompleteness(mockChatResponse.completeness);
+          setNextQuestions([]);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '퀵스타트 진입에 실패했습니다.';
         setError(msg);
       } finally {
         setIsLoading(false);
       }
     },
-    [sessionId, isLoading],
+    [sessionId, isLoading]
   );
 
   return {
@@ -168,5 +362,10 @@ export function useChat(): UseChatReturn {
     sendMessage,
     setPendingInput,
     pendingInput,
+    performAction,
+    cancelMessage,
+    quickStart,
+    streamingMessage,
+    streamingStatus,
   };
 }
