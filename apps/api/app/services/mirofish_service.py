@@ -12,7 +12,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, AsyncGenerator
 from app.config import settings
 from app.schemas.prd import PRDDocument
-from app.schemas.stakeholder import Stakeholder, StakeholderProposalResponse
+from app.schemas import Stakeholder, StakeholderProposalResponse
+from app.services.llm_provider import get_llm_service
 
 logger = logging.getLogger("app.services.mirofish")
 
@@ -23,6 +24,50 @@ class MiroFishService:
         self.llm_base_url = settings.openai_api_base
         self.llm_key = settings.openai_api_key
         self.llm_model = settings.openai_model_name
+
+    async def _call_stakeholder_llm(self, system_prompt: str, user_prompt: str) -> str:
+        """
+        Send a single system+user prompt to whichever LLM backend is
+        configured (Claude, real OpenAI, or the local Ollama OpenAI-compatible
+        endpoint) and return the raw assistant text.
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        if settings.llm_provider in ("claude", "openai"):
+            return await get_llm_service().chat(messages)
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                self.llm_base_url + "/chat/completions",
+                headers={"Authorization": f"Bearer {self.llm_key}"},
+                json={
+                    "model": self.llm_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "response_format": {"type": "json_object"}
+                }
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+
+    def _parse_stakeholders_lenient(self, data: Dict[str, Any]) -> List[Stakeholder]:
+        """
+        Parse the 'stakeholders' array item-by-item, skipping any single
+        malformed entry instead of discarding the whole batch (Ollama's
+        JSON mode occasionally produces one off-schema item among 8-12).
+        """
+        raw_items = data.get("stakeholders", [])
+        stakeholders: List[Stakeholder] = []
+        for i, item in enumerate(raw_items):
+            try:
+                stakeholders.append(Stakeholder(**item))
+            except Exception as item_err:
+                logger.warning(f"Skipping malformed stakeholder at index {i}: {item_err}. Raw item: {item}")
+        return stakeholders
 
     async def _request(self, method: str, path: str, **kwargs) -> Dict[str, Any]:
         # Ensure path starts with /api/ unless it's a direct endpoint like /health
@@ -77,29 +122,21 @@ class MiroFishService:
         IMPORTANT: Return the response in the PRIMARY LANGUAGE of the PRD content (Korean).
         """
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                self.llm_base_url + "/chat/completions",
-                headers={"Authorization": f"Bearer {self.llm_key}"},
-                json={
-                    "model": self.llm_model,
-                    "messages": [
-                        {"role": "system", "content": "You are a product management consultant expert in stakeholder analysis. Always return Korean names and responses."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "response_format": {"type": "json_object"}
-                }
-            )
-            resp.raise_for_status()
-            data_content = resp.json()["choices"][0]["message"]["content"]
-            logger.debug(f"LLM Stakeholder Response (dict mode): {data_content}")
-            
-            try:
-                result = self._extract_json(data_content)
-                return [Stakeholder(**s) for s in result.get("stakeholders", [])]
-            except Exception as je:
-                logger.error(f"JSON Parse Error (dict mode): {je}. Raw: {data_content}")
-                raise je
+        data_content = await self._call_stakeholder_llm(
+            system_prompt="You are a product management consultant expert in stakeholder analysis. Always return Korean names and responses.",
+            user_prompt=prompt,
+        )
+        logger.debug(f"LLM Stakeholder Response (dict mode): {data_content}")
+
+        try:
+            result = self._extract_json(data_content)
+            stakeholders = self._parse_stakeholders_lenient(result)
+        except Exception as je:
+            logger.error(f"JSON Parse Error (dict mode): {je}. Raw: {data_content}")
+            raise je
+        if not stakeholders:
+            raise ValueError(f"No valid stakeholders parsed from LLM response (dict mode). Raw: {data_content}")
+        return stakeholders
 
     async def propose_stakeholders(self, prd: PRDDocument) -> List[Stakeholder]:
         """
@@ -136,31 +173,21 @@ class MiroFishService:
         Return result as a JSON object with a 'stakeholders' key containing an array of objects.
         """
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                self.llm_base_url + "/chat/completions",
-                headers={"Authorization": f"Bearer {self.llm_key}"},
-                json={
-                    "model": self.llm_model,
-                    "messages": [
-                        {"role": "system", "content": "You are a product management consultant expert in stakeholder analysis. Always return Korean names and responses."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "response_format": {"type": "json_object"}
-                }
-            )
-            resp.raise_for_status()
-            result_json = resp.json()
-            content = result_json["choices"][0]["message"]["content"]
-            
-            logger.debug(f"LLM Stakeholder Response: {content}")
-            
-            try:
-                data = self._extract_json(content)
-                return [Stakeholder(**s) for s in data.get("stakeholders", [])]
-            except Exception as je:
-                logger.error(f"JSON Parse Error for stakeholders: {je}. Raw content: {content}")
-                raise je
+        content = await self._call_stakeholder_llm(
+            system_prompt="You are a product management consultant expert in stakeholder analysis. Always return Korean names and responses.",
+            user_prompt=prompt,
+        )
+        logger.debug(f"LLM Stakeholder Response: {content}")
+
+        try:
+            data = self._extract_json(content)
+            stakeholders = self._parse_stakeholders_lenient(data)
+        except Exception as je:
+            logger.error(f"JSON Parse Error for stakeholders: {je}. Raw content: {content}")
+            raise je
+        if not stakeholders:
+            raise ValueError(f"No valid stakeholders parsed from LLM response. Raw content: {content}")
+        return stakeholders
 
     async def setup_project_and_graph(self, prd: PRDDocument) -> Dict[str, str]:
         """

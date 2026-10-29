@@ -33,6 +33,7 @@ from .common import (
     Requirement,
     Risk,
     Stakeholder,
+    StakeholderProposalResponse,
     TaggedItem,
     ValidationResult,
 )
@@ -81,6 +82,7 @@ __all__ = [
     "Requirement",
     "Risk",
     "Stakeholder",
+    "StakeholderProposalResponse",
     "TaggedItem",
     "ValidationResult",
     # --- Section models ---

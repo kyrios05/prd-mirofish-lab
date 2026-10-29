@@ -69,6 +69,12 @@ class Stakeholder(BaseModel):
     )
 
 
+class StakeholderProposalResponse(BaseModel):
+    """LLM response envelope for proposed validation stakeholders."""
+
+    stakeholders: list[Stakeholder]
+
+
 # ---------------------------------------------------------------------------
 # Feature
 # ---------------------------------------------------------------------------
