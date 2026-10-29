@@ -10,6 +10,7 @@ if [[ ! -f "$engine_root/docker-compose.yml" ]]; then
 fi
 
 docker compose --project-name mirofish-offline \
+  --env-file "$engine_root/.env" \
   --env-file "$repo_root/apps/api/.env" \
   -f "$engine_root/docker-compose.yml" \
   -f "$repo_root/compose.mirofish.yml" \
