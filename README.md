@@ -12,7 +12,7 @@ docker compose up -d --build api web
 
 Set `MIROFISH_SOURCE_DIR` if the engine checkout is elsewhere. The engine uses
 `OPENAI_API_KEY` and `OPENAI_MODEL` from `apps/api/.env` (default model:
-`gpt-5.6-terra`), including its parallel simulation agents. The script rebuilds
+`gpt-6.1-terra`, reasoning effort `high`), including its parallel simulation agents. The script rebuilds
 the engine so local provider compatibility fixes are included, and reuses the
 existing `mirofish-offline` Compose project and Neo4j volumes.
 

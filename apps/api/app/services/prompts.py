@@ -1,9 +1,18 @@
 """
-app/services/prompts.py — Centralized LLM prompts.
+app/services/prompts.py — Centralized LLM prompts and response parsing.
 """
 
 from typing import Any
 import json
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+_GREETING_ONLY_PATTERN = re.compile(
+    r"^\s*(?:안녕(?:하세요)?|반갑습니다?|hello|hi|hey)\s*[!.?~👋😊]*\s*$",
+    re.IGNORECASE,
+)
 
 SYSTEM_PROMPT_TEMPLATE = """당신은 사용자의 아이디어를 구체적인 PRD(제품 요구사항 정의서)로 변환해주는 'MiroFish PRD Lab'의 수석 제품 기획자 AI입니다.
 
@@ -15,6 +24,8 @@ SYSTEM_PROMPT_TEMPLATE = """당신은 사용자의 아이디어를 구체적인 
    - **아래 정의된 SCHEMA 구조를 단 1개의 필드명도 틀리지 말고 엄격히 준수하세요.** 
    - 기존 데이터를 삭제하지 말고 누적하여 업데이트하세요.
    - 불필요한 필드를 직접 지어내지 마세요.
+   - 사용자가 제공한 사실로 뒷받침되는 필드만 포함하세요. 인사, 확인, 질문처럼 제품 정보를 제공하지 않은 메시지에는 반드시 빈 객체(`{{}}`)만 반환하세요.
+   - 누락된 PRD 섹션을 추측해 채우거나 완성도를 높이지 마세요.
 
 [PRD_SCHEMA.json 엄격 준수 가이드]
 반드시 아래 키(Key) 이름과 구조를 사용해야 합니다:
@@ -39,3 +50,39 @@ SYSTEM_PROMPT_TEMPLATE = """당신은 사용자의 아이디어를 구체적인 
 def build_system_prompt(current_prd_draft: dict[str, Any]) -> str:
     draft_str = json.dumps(current_prd_draft, indent=2, ensure_ascii=False)
     return SYSTEM_PROMPT_TEMPLATE.format(draft_context=draft_str)
+
+
+def is_greeting_only(message: str) -> bool:
+    """Return whether a message is a greeting without product information."""
+    return bool(_GREETING_ONLY_PATTERN.fullmatch(message))
+
+
+def extract_prd_json(text: str) -> dict[str, Any]:
+    """
+    Extract the PRD JSON object from an LLM response.
+
+    Prefers a fenced ```json block (what the system prompt asks for), and falls
+    back to the outermost {...} span for models that ignore the fence. Returns
+    an empty dict when nothing parseable is present — callers treat that as
+    "no delta this turn" rather than an error.
+
+    Shared by all LLM backends (ollama / claude / openai) so provider swaps
+    cannot change how responses are parsed.
+    """
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse extracted JSON: {e}")
+            return {}
+
+    try:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        pass
+
+    return {}

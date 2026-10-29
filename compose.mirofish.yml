@@ -24,12 +24,15 @@ services:
     environment:
       LLM_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in apps/api/.env}
       LLM_BASE_URL: https://api.openai.com/v1
-      LLM_MODEL_NAME: ${OPENAI_MODEL:-gpt-5.6-terra}
+      LLM_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-high}
+      LLM_MODEL_NAME: ${OPENAI_MODEL:-gpt-6.1-terra}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in apps/api/.env}
       OPENAI_API_BASE_URL: https://api.openai.com/v1
       LLM_BOOST_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in apps/api/.env}
       LLM_BOOST_BASE_URL: https://api.openai.com/v1
-      LLM_BOOST_MODEL_NAME: ${OPENAI_MODEL:-gpt-5.6-terra}
+      PERSONA_LAB_MODEL: ${OPENAI_MODEL:-gpt-6.1-terra}
+      PERSONA_LAB_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-high}
+      LLM_BOOST_MODEL_NAME: ${OPENAI_MODEL:-gpt-6.1-terra}
 
 volumes:
   mirofish_hf_cache:

@@ -2,6 +2,8 @@
 config.py — Application configuration via environment variables.
 """
 
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -84,7 +86,7 @@ class Settings(BaseSettings):
         description="OpenAI-compatible API key",
     )
     openai_model_name: str = Field(
-        default="qwen3.5:27b",
+        default="gpt-6.1-terra",
         description="LLM model name to use for analysis.",
     )
 
@@ -103,7 +105,40 @@ class Settings(BaseSettings):
     )
     ollama_enabled: bool = Field(
         default=True,
-        description="Enable/Disable local Ollama LLM (False forces mock mode).",
+        description="Enable/Disable real LLM calls entirely (False forces mock mode).",
+    )
+
+    # Anthropic Claude API
+    anthropic_api_key: str = Field(
+        default="",
+        description="Anthropic API key (https://console.anthropic.com). Required when llm_provider='claude'.",
+    )
+    anthropic_model: str = Field(
+        default="claude-sonnet-5",
+        description="Claude model used for chat PRD generation and stakeholder proposals.",
+    )
+
+    # OpenAI API (real api.openai.com, distinct from the OpenAI-compatible
+    # Ollama proxy config above — shares the same OPENAI_API_KEY env var).
+    openai_model: str = Field(
+        default="gpt-6.1-terra",
+        description="OpenAI model used for chat PRD generation and stakeholder proposals when llm_provider='openai'.",
+    )
+    openai_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = Field(
+        default="high", description="Reasoning effort for every OpenAI generation request."
+    )
+    llm_timeout: int = Field(
+        default=180,
+        description="Maximum seconds to wait for one configured LLM request.",
+    )
+
+    # LLM provider selection (chat PRD generation + stakeholder proposals).
+    # Only takes effect when ollama_enabled is True.
+    # Validated as a Literal so an unknown value fails at startup. Without this,
+    # a typo silently falls through to a *different* backend in each call site.
+    llm_provider: Literal["openai", "claude", "ollama"] = Field(
+        default="openai",
+        description="Which LLM backend to use: 'openai', 'claude', or 'ollama'.",
     )
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}

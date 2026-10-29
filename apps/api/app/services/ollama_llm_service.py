@@ -4,11 +4,12 @@ services/ollama_llm_service.py — Service for interacting with local Ollama LLM
 
 import json
 import logging
-import re
 from typing import Any, Optional
 
 import httpx
 from app.config import settings
+from app.services.prompts import build_system_prompt as build_strict_prompt
+from app.services.prompts import extract_prd_json
 
 logger = logging.getLogger("app.api.ollama")
 
@@ -121,39 +122,9 @@ class OllamaLLMService:
                 raise
 
     def extract_prd_json(self, text: str) -> dict[str, Any]:
-        """
-        Extract the first JSON code block from the LLM response text.
-        Returns a dict of the extracted JSON or an empty dict if not found.
-        """
-        # Search for ```json ... ``` or just ``` ... ```
-        json_pattern = r"```(?:json)?\s*(\{.*?\})\s*```"
-        match = re.search(json_pattern, text, re.DOTALL)
-        
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse extracted JSON: {e}")
-                return {}
-        
-        # Fallback: try to find anything that looks like a JSON object
-        try:
-            # Look for the first '{' and the last '}'
-            start = text.find('{')
-            end = text.rfind('}')
-            if start != -1 and end != -1 and end > start:
-                return json.loads(text[start:end+1])
-        except json.JSONDecodeError:
-            pass
-            
-        return {}
+        """Extract the PRD JSON object from the response (see prompts module)."""
+        return extract_prd_json(text)
 
     def build_system_prompt(self, current_prd_draft: Optional[dict[str, Any]] = None) -> str:
-        """
-        Build the system prompt with context about the PRD schema and current state.
-        Uses the strict template from app.services.prompts.
-        """
-        from app.services.prompts import build_system_prompt as build_strict_prompt
-        
-        draft = current_prd_draft or {"schema_version": "0.1.0"}
-        return build_strict_prompt(draft)
+        """Build the strict PRD system prompt for the current draft."""
+        return build_strict_prompt(current_prd_draft or {"schema_version": "0.1.0"})

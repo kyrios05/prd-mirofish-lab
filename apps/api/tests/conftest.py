@@ -5,6 +5,7 @@ conftest.py — Shared pytest fixtures and path helpers for the API test suite.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,36 @@ import pytest
 # Fixture directory
 # ---------------------------------------------------------------------------
 FIXTURES_DIR: Path = Path(__file__).parent / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# Environment isolation
+# ---------------------------------------------------------------------------
+# Settings loads apps/api/.env (see Settings.model_config). That file holds the
+# developer's local setup (MIROFISH_MODE=live, real API keys), which would make
+# tests that assert *default* values fail depending on who runs them. Point the
+# env_file at a path that does not exist and clear the matching env vars so the
+# whole suite always sees pristine defaults.
+_ISOLATED_ENV_PREFIXES = ("MIROFISH_", "OLLAMA_", "OPENAI_", "ANTHROPIC_", "LLM_")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make Settings() deterministic: no .env file, no ambient provider vars."""
+    from app.config import Settings, settings as live_settings
+    from app.services import llm_provider
+
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    for key in list(os.environ):
+        if key.startswith(_ISOLATED_ENV_PREFIXES) or key == "DEBUG":
+            monkeypatch.delenv(key, raising=False)
+
+    # Clearing env only affects newly constructed Settings(); the already
+    # imported singleton keeps whatever .env said. Tests must never reach a
+    # real LLM, so force the deterministic mock-builder path on it too.
+    # A test that wants the LLM path can re-enable it and mock the transport.
+    monkeypatch.setattr(live_settings, "ollama_enabled", False, raising=False)
+    llm_provider.reset_cache()
 
 
 # ---------------------------------------------------------------------------
