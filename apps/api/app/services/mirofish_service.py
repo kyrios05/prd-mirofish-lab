@@ -185,25 +185,11 @@ class MiroFishService:
         
         # 3. Build Graph
         logger.info(f"Building MiroFish graph for project {project_id}...")
-        try:
-            build_resp = await self._request("POST", "/graph/build", json={"project_id": project_id})
-            task_id = build_resp["data"]["task_id"]
-            
-            # 4. Wait for graph build completion
-            graph_id = await self._wait_for_task(task_id)
-        except Exception as e:
-            logger.warning(f"Graph build failed/skipped: {e}. Trying to find existing graph in project info.")
-            try:
-                proj_info = await self._request("GET", f"/graph/project/{project_id}")
-                actual_graph_id = proj_info.get("data", {}).get("graph_id")
-                if actual_graph_id:
-                    graph_id = actual_graph_id
-                    logger.info(f"Successfully recovered actual graph_id from MiroFish: {graph_id}")
-                else:
-                    graph_id = f"graph_{project_id}"
-            except Exception as ex:
-                logger.error(f"Failed to fetch project details after build error: {ex}")
-                graph_id = f"graph_{project_id}" 
+        build_resp = await self._request("POST", "/graph/build", json={"project_id": project_id})
+        task_id = build_resp["data"]["task_id"]
+
+        # Only a completed engine task can supply a usable graph ID.
+        graph_id = await self._wait_for_task(task_id)
         
         return {
             "project_id": project_id,
@@ -314,7 +300,8 @@ class MiroFishService:
                 data = resp["data"]
                 status = data.get("runner_status")
                 all_actions = data.get("all_actions", [])
-                progress = data.get("progress_percent", 0)
+                # The engine reports 0..100; the browser SSE contract is 0..1.
+                progress = max(0.0, min(float(data.get("progress_percent") or 0) / 100, 1.0))
                 
                 # Yield new actions
                 if len(all_actions) > last_action_count:
@@ -332,8 +319,16 @@ class MiroFishService:
                              "type": "simulation_complete", 
                              "content": "Simulation finished successfully. Analysis report is being prepared.", 
                              "timestamp": datetime.now().isoformat(),
-                             "progress": 100
+                             "progress": 1.0
                          }
+                    else:
+                        yield {
+                            "type": "simulation_error",
+                            "content": data.get("error") or f"MiroFish simulation {status}.",
+                            "timestamp": datetime.now().isoformat(),
+                            "progress": progress,
+                            "mode": "live",
+                        }
                     break
                     
                 await asyncio.sleep(settings.mirofish_polling_interval)
