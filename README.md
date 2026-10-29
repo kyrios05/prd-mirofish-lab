@@ -19,6 +19,8 @@ existing `mirofish-offline` Compose project and Neo4j volumes.
 Graph embeddings still use the engine's configured `nomic-embed-text` model;
 start the installed Ollama app before building graphs. Health checks alone do
 not verify ontology generation, graph building, or simulation execution.
+OASIS also downloads its Twitter recommendation model on first use; the
+Compose override persists its Hugging Face cache across engine recreation.
 
 Open the app at <http://localhost:3000>. The engine backend is available at
 <http://localhost:5001/health>.

@@ -19,6 +19,8 @@ services:
         COPY . .
         EXPOSE 3000 5001
         CMD ["npm", "run", "dev"]
+    volumes:
+      - mirofish_hf_cache:/root/.cache/huggingface
     environment:
       LLM_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in apps/api/.env}
       LLM_BASE_URL: https://api.openai.com/v1
@@ -28,3 +30,6 @@ services:
       LLM_BOOST_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in apps/api/.env}
       LLM_BOOST_BASE_URL: https://api.openai.com/v1
       LLM_BOOST_MODEL_NAME: ${OPENAI_MODEL:-gpt-5.6-terra}
+
+volumes:
+  mirofish_hf_cache:
