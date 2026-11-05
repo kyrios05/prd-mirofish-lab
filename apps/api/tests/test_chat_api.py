@@ -203,6 +203,69 @@ class TestChatMessageContract:
         )
         assert resp.status_code == 422  # Pydantic min_length=1 validation
 
+    def test_live_message_uses_llm_without_mock_prd_progress(
+        self,
+        client: TestClient,
+        session_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from app.services import prd_generator
+
+        class StubLLM:
+            def build_system_prompt(self, current_prd_draft: dict) -> str:
+                return "system prompt"
+
+            async def chat(self, messages: list[dict[str, str]]) -> str:
+                return (
+                    "안녕하세요! 어떤 제품을 함께 기획해 볼까요?\n"
+                    "```json\n"
+                    '{"metadata": {"project_id": "invented"}, '
+                    '"product": {"name": "invented"}}\n'
+                    "```"
+                )
+
+            def extract_prd_json(self, text: str) -> dict:
+                return {
+                    "metadata": {"project_id": "invented"},
+                    "product": {"name": "invented"},
+                }
+
+        monkeypatch.setattr(prd_generator, "get_llm_service", lambda: StubLLM())
+
+        resp = client.post(
+            "/chat/message",
+            json={"session_id": session_id, "message": "안녕", "live": True},
+        )
+
+        data = resp.json()
+        assert resp.status_code == 200
+        assert data["assistant_message"] == "안녕하세요! 어떤 제품을 함께 기획해 볼까요?"
+        assert data["completeness"]["progress"] == 0.0
+        assert "[Mock]" not in data["assistant_message"]
+
+    def test_live_quota_error_returns_actionable_message(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from app.services import prd_generator
+
+        monkeypatch.setattr(prd_generator.settings, "llm_provider", "openai")
+
+        message = prd_generator._llm_failure_message(
+            RuntimeError("You exceeded your current quota. Check billing details.")
+        )
+
+        assert "사용 한도" in message
+        assert "PRD 초안을 변경하지 않았습니다" in message
+        assert "RuntimeError" not in message
+
+    def test_greeting_only_detection(self):
+        from app.services.prompts import is_greeting_only
+
+        assert is_greeting_only("안녕") is True
+        assert is_greeting_only("안녕하세요! 👋") is True
+        assert is_greeting_only("안녕하세요, 직장인을 위한 일정 관리 앱을 만들고 싶어요.") is False
+
 
 # ---------------------------------------------------------------------------
 # 4. TestMockPRDProgression

@@ -512,3 +512,7 @@ class MiroFishService:
         """Fetch completed simulation report markdown."""
         return await self._request("GET", f"/api/report/by-simulation/{simulation_id}")
 
+
+    async def get_report(self, report_id: str) -> Dict[str, Any]:
+        """Retrieve the exact report produced by this task."""
+        return await self._request("GET", f"/api/report/{report_id}")

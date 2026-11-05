@@ -66,23 +66,46 @@ class MiroFishClient:
     ) -> None:
         self.base_url = base_url
         self.api_key = api_key
-        self.mode = mode.lower()
         self.fallback_to_mock = fallback_to_mock
+
+        # Kept so the adapter can still be built if mode flips to "live" after
+        # construction (the /validation/run route does exactly that).
+        self._adapter_kwargs = {
+            "base_url": base_url,
+            "api_key": api_key,
+            "timeout": timeout,
+            "max_retries": max_retries,
+            "polling_interval": polling_interval,
+            "max_polling_attempts": max_polling,
+        }
 
         # Lazily built; only used in live mode
         self._adapter: MiroFishAdapter | None = None
-        if self.mode == "live":
-            self._adapter = MiroFishAdapter(
-                base_url=base_url,
-                api_key=api_key,
-                timeout=timeout,
-                max_retries=max_retries,
-                polling_interval=polling_interval,
-                max_polling_attempts=max_polling,
-            )
+        self.mode = mode.lower()  # property setter builds the adapter if needed
 
         # Last job metadata (populated after a live-mode call)
         self.last_job: MiroFishJob | None = None
+
+    # -----------------------------------------------------------------------
+    # Mode
+    # -----------------------------------------------------------------------
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @mode.setter
+    def mode(self, value: str) -> None:
+        """
+        Set mock/live mode, building the adapter on first switch to live.
+
+        A plain attribute would let callers set mode="live" without an adapter,
+        in which case run_validation() silently fell back to the mock engine
+        while reporting mode="live" to the client.
+        """
+        self._mode = (value or "mock").lower()
+        if self._mode == "live" and self._adapter is None:
+            self._adapter = MiroFishAdapter(**self._adapter_kwargs)
 
     # -----------------------------------------------------------------------
     # Public API

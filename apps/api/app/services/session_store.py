@@ -1,8 +1,8 @@
 """
-services/session_store.py — In-memory session state store.
+services/session_store.py — Cached session state with SQLite snapshots.
 
 Stores conversation history and the current PRD draft for each chat session.
-The store is a module-level singleton (plain dict) — no persistence.
+The single-instance lab keeps mutable sessions in memory and saves snapshots to SQLite.
 
 T09 additions (backward-compatible)
 ------------------------------------
@@ -18,7 +18,8 @@ Scope guard
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from app.services import state_db
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -122,7 +123,7 @@ class SessionStore:
     locking is needed for the in-memory dict.
 
     NOTE(T09): State machine and checkpointing added in T09.
-    Persistent backend: separate infra ticket.
+    SQLite snapshots survive process restarts; run one API worker.
     """
 
     def __init__(self) -> None:
@@ -134,23 +135,31 @@ class SessionStore:
         """Create and register a new session, returning the SessionState."""
         session_id = str(uuid.uuid4())
         state = SessionState(session_id=session_id)
-        self._store[session_id] = state
+        self.save_session(state)
         return state
 
     def get_session(self, session_id: str) -> SessionState | None:
         """Return SessionState or None if not found."""
+        if session_id not in self._store:
+            data = state_db.load("session", session_id)
+            if data:
+                data["conversation_history"] = [ConversationTurn(**turn) for turn in data.get("conversation_history", [])]
+                data["checkpoints"] = [Checkpoint(**item) for item in data.get("checkpoints", [])]
+                data["phase_history"] = [PhaseTransition(**item) for item in data.get("phase_history", [])]
+                self._store[session_id] = SessionState(**data)
         return self._store.get(session_id)
 
     def save_session(self, state: SessionState) -> None:
         """Persist (overwrite) a session state object."""
         self._store[state.session_id] = state
+        state_db.save("session", state.session_id, asdict(state))
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session. Returns True if it existed."""
-        if session_id in self._store:
-            del self._store[session_id]
-            return True
-        return False
+        exists = self.get_session(session_id) is not None
+        self._store.pop(session_id, None)
+        state_db.delete("session", session_id)
+        return exists
 
     # ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -160,6 +169,7 @@ class SessionStore:
     def clear(self) -> None:
         """Wipe all sessions — useful for tests."""
         self._store.clear()
+        state_db.delete("session")
 
 
 # ---------------------------------------------------------------------------

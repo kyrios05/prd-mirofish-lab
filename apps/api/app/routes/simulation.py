@@ -6,49 +6,30 @@ Features mocked asynchronous SSE streams for graph updates, agent chatter, and r
 until full MiroFish wiring is established.
 """
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 import asyncio
+import json
 import logging
-from typing import Any, Dict, Optional
+from uuid import uuid4
+from typing import Any, AsyncGenerator, Dict, Optional
 from datetime import datetime, timezone
 
 from app.config import settings
+from app.services.llm_provider import get_llm_service
 from app.services.mirofish_service import MiroFishService
-from app.schemas.prd import PRDDocument
-from app.schemas.stakeholder import Stakeholder
+from app.schemas import PRDDocument, Stakeholder
 
 router = APIRouter(prefix="/simulation", tags=["simulation"])
 logger = logging.getLogger("app.api.simulation")
 
-# Session state to hold active MiroFish IDs
-# In a real app, this would be in a DB
-session_state: Dict[str, str] = {
-    "project_id": "",
-    "graph_id": "",
-    "simulation_id": ""
-}
+from app.services.simulation_store import resolve_run, stream_events
 
 mirofish = MiroFishService()
 
-@router.post("/propose-stakeholders")
-async def propose_stakeholders(request: Request):
-    """Analyze PRD and propose a list of stakeholders with personas."""
-    try:
-        payload = await request.json()
-        if payload is None:
-            payload = {}
-    except Exception:
-        payload = {}
 
-    is_live = payload.get("live", False)
-
-    # 만약 Mock 모드이거나 Qwen 라이브 모드가 아닌 경우, 30인의 고밀도 전문가 명단 즉시 반환
-    # 역할은 같아도 사람명이 달라지며 (ex. 아키텍트 A, 아키텍트 B), Review Angle과 Likely Objections가 매우 디테일하게 작성됨.
-    if not is_live or settings.mirofish_mode != "live":
-        return {
-            "status": "success",
-            "stakeholders": [
+# Dense mock stakeholder panel shared by mock mode and live-LLM failure fallback.
+MOCK_STAKEHOLDER_PANEL = [
                 {
                     "name": "PM 김철수",
                     "role": "Product Manager",
@@ -320,37 +301,78 @@ async def propose_stakeholders(request: Request):
                     ]
                 }
             ]
+
+
+MIN_STAKEHOLDER_COUNT = 8
+
+
+def _live_llm_error_message(exc: Exception) -> str:
+    if isinstance(exc, asyncio.TimeoutError):
+        return (
+            f"OpenAI {settings.openai_model} 응답이 {settings.llm_timeout}초 안에 완료되지 않았습니다. "
+            "Mock 결과로 대체하지 않았습니다."
+        )
+
+    detail = str(exc).strip() or type(exc).__name__
+    return f"OpenAI {settings.openai_model} 호출에 실패했습니다: {detail}"
+
+@router.post("/propose-stakeholders")
+async def propose_stakeholders(request: Request):
+    """Analyze PRD and propose a list of stakeholders with personas."""
+    try:
+        payload = await request.json()
+        if payload is None:
+            payload = {}
+    except Exception:
+        payload = {}
+
+    is_live = payload.get("live") is True
+    prd_payload = payload.get("prd") if isinstance(payload.get("prd"), dict) else payload
+
+    # 만약 Mock 모드이거나 Qwen 라이브 모드가 아닌 경우, 30인의 고밀도 전문가 명단 즉시 반환
+    # 역할은 같아도 사람명이 달라지며 (ex. 아키텍트 A, 아키텍트 B), Review Angle과 Likely Objections가 매우 디테일하게 작성됨.
+    if not is_live:
+        return {
+            "status": "success",
+            "stakeholders": MOCK_STAKEHOLDER_PANEL,
         }
 
     # Live Mode
     try:
         # Try to parse as full PRD first
         try:
-            from pydantic import ValidationError
-            prd = PRDDocument(**payload)
-            stakeholders = await mirofish.propose_stakeholders(prd)
+            prd = PRDDocument(**prd_payload)
         except Exception:
-            # Fallback to dictionary-based extraction
-            stakeholders = await mirofish.propose_stakeholders_from_dict(payload)
-            
+            stakeholders = await asyncio.wait_for(
+                mirofish.propose_stakeholders_from_dict(prd_payload),
+                timeout=settings.llm_timeout,
+            )
+        else:
+            stakeholders = await asyncio.wait_for(
+                mirofish.propose_stakeholders(prd),
+                timeout=settings.llm_timeout,
+            )
+
+        if len(stakeholders) < MIN_STAKEHOLDER_COUNT:
+            logger.warning(
+                "Stakeholder proposal returned %d personas in live mode",
+                len(stakeholders),
+            )
+            return {
+                "status": "error",
+                "message": "Live LLM이 충분한 Reality Seeds를 생성하지 못했습니다. Mock 결과로 대체하지 않았습니다.",
+            }
+
         return {"status": "success", "stakeholders": [s.model_dump() for s in stakeholders]}
     except Exception as e:
-        logger.error(f"Stakeholder proposal failed, returning rich B2B enterprise fallback panel: {e}")
-        # Live mode fallback if LLM fails
+        logger.error("Live stakeholder proposal failed: %s", e)
         return {
-            "status": "success",
-            "stakeholders": [
-                {
-                    "name": "PM 김철수",
-                    "role": "Product Manager",
-                    "review_angle": "비즈니스 가치 극대화 및 기한 준수 평가",
-                    "likely_objections": ["일정 지연 위험"]
-                }
-            ]
+            "status": "error",
+            "message": _live_llm_error_message(e),
         }
 
 @router.post("/setup")
-async def setup_simulation(request: Request):
+async def setup_simulation(request: Request, *, session_state: dict[str, Any] = Depends(resolve_run)):
     """Prepare PRD into SimulationSpec and return initial config."""
     if settings.mirofish_mode != "live":
         return {"status": "success", "message": "Mock simulation setup ready", "setup_data": {}}
@@ -369,6 +391,7 @@ async def setup_simulation(request: Request):
             ids = await mirofish.setup_project_and_graph_from_dict(payload)
             
         session_state.update(ids)
+        session_state["status"] = "setup"
         
         return {
             "status": "success", 
@@ -383,19 +406,23 @@ async def setup_simulation(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/start")
-async def start_simulation(payload: dict[str, Any]):
+async def start_simulation(payload: dict[str, Any], *, session_state: dict[str, Any] = Depends(resolve_run)):
     """Start the multi-agent simulation run on MiroFish."""
     # 사용자가 Reality Seeds 설정창에서 조정한 stakeholder 리스트를 받아 세션 상태에 보관
     session_state["stakeholder_personas"] = payload.get("stakeholder_personas", [])
     
     is_live = payload.get("live", False)
+    session_state["mode"] = "live" if is_live else "mock"
 
-    if not is_live or settings.mirofish_mode != "live":
-        return {"status": "started", "simulation_id": "sim_mock_12345678"}
+    if is_live and settings.mirofish_mode != "live":
+        raise HTTPException(409, "Live engine mode is disabled")
+
+    if not is_live:
+        return {"status": "started", "simulation_id": session_state["run_id"]}
 
     try:
-        project_id = session_state.get("project_id")
-        graph_id = session_state.get("graph_id")
+        project_id = payload.get("project_id") or session_state.get("project_id")
+        graph_id = payload.get("graph_id") or session_state.get("graph_id")
         
         if not project_id or not graph_id:
              # Try to get from payload if not in session
@@ -408,15 +435,11 @@ async def start_simulation(payload: dict[str, Any]):
         sim_id = await mirofish.create_and_start_simulation(project_id, graph_id)
         session_state["simulation_id"] = sim_id
         
-        return {"status": "started", "simulation_id": sim_id}
+        return {"status": "started", "simulation_id": session_state["run_id"], "engine_simulation_id": sim_id}
     except Exception as e:
         logger.error(f"Start failed: {e}")
-        if settings.mirofish_fallback_to_mock:
-            return {"status": "started", "simulation_id": "sim_mock_error_fallback"}
-        raise HTTPException(status_code=500, detail=str(e))
-        logger.error(f"Start failed: {e}")
-        if settings.mirofish_fallback_to_mock:
-            return {"status": "started", "simulation_id": "sim_mock_error_fallback"}
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=500, detail=str(e))
 
 # Comprehensive 77-node and 154-link mock database for scalable visualization
@@ -669,279 +692,509 @@ ALL_MOCK_LINKS = [
     {"source": "Sys_Consensus", "target": "Milestone_GA_2"}
 ]
 
-async def _simulation_event_generator(mode: str = "mock", reason: str = None):
+def _simulation_context(*, session_state: dict[str, Any]) -> dict[str, Any]:
+    prd = session_state.get("prd_snapshot") or {}
+    product = prd.get("product") or {}
+    problem = prd.get("problem") or {}
+    solution = prd.get("solution") or {}
+    requirements = (prd.get("requirements") or {}).get("functional") or []
+    requirement_texts = [
+        str(item.get("description") or item.get("title") or item.get("id"))
+        for item in requirements
+        if isinstance(item, dict)
+    ]
+    return {
+        "product_name": str(product.get("name") or product.get("one_liner") or "현재 제품"),
+        "problem": str(problem.get("core_problem") or problem.get("summary") or "해결하려는 문제"),
+        "solution": str(solution.get("summary") or solution.get("value_proposition") or "제안된 해결 방식"),
+        "requirements": [item for item in requirement_texts if item],
+    }
+
+
+def _build_mock_dialogues(personas: list[dict[str, Any]], context: dict[str, Any]) -> list[dict[str, Any]]:
+    requirements = context["requirements"] or ["MVP 범위와 인수 기준"]
+    dialogues: list[dict[str, Any]] = []
+    active_personas = personas[:10]
+    for index, persona in enumerate(active_personas):
+        name = str(persona.get("name") or f"Stakeholder {index + 1}")
+        role = str(persona.get("role") or "Stakeholder")
+        review_angle = str(persona.get("review_angle") or "현재 PRD의 실행 가능성")
+        objections = persona.get("likely_objections") or []
+        objection = str(objections[0]) if objections else "명확한 인수 기준이 필요합니다."
+        requirement = requirements[index % len(requirements)]
+        content = (
+            f"{context['product_name']}의 '{context['problem']}' 가설을 {review_angle} 관점에서 검토했습니다. "
+            f"우선 '{requirement}' 요구사항이 이 문제를 검증할 수 있도록 범위와 측정 기준을 명확히 해야 합니다. "
+            f"주요 이의는 '{objection}'입니다."
+        )
+        dialogues.append({
+            "speaker": name,
+            "role": role,
+            "reply_to": "topic",
+            "round": 1,
+            "stance": "challenge",
+            "claim_reference": "현재 제품 가설과 요구사항",
+            "content": content,
+        })
+
+    for index, persona in enumerate(active_personas):
+        name = str(persona.get("name") or f"Stakeholder {index + 1}")
+        role = str(persona.get("role") or "Stakeholder")
+        previous_name = str(active_personas[index - 1].get("name") or "앞선 참여자")
+        requirement = requirements[(index + 1) % len(requirements)]
+        objections = persona.get("likely_objections") or []
+        objection = str(objections[-1]) if objections else "검증 가능한 기준이 필요합니다."
+        dialogues.append({
+            "speaker": name,
+            "role": role,
+            "reply_to": previous_name,
+            "round": 2,
+            "stance": "challenge",
+            "claim_reference": f"{previous_name}의 범위 및 검증 기준 우려",
+            "content": (
+                f"{previous_name}의 우려만으로 '{requirement}' 범위를 축소하는 데는 반대합니다. "
+                f"'{objection}'을 확인할 실패 시나리오와 책임자를 같은 실험에 넣어야 하며, 그 결과가 나오기 전에는 다음 단계로 진행할 수 없습니다."
+            ),
+        })
+
+    for index, persona in enumerate(active_personas):
+        name = str(persona.get("name") or f"Stakeholder {index + 1}")
+        role = str(persona.get("role") or "Stakeholder")
+        previous_name = str(active_personas[index - 1].get("name") or "앞선 참여자")
+        requirement = requirements[(index + 2) % len(requirements)]
+        dialogues.append({
+            "speaker": name,
+            "role": role,
+            "reply_to": previous_name,
+            "round": 3,
+            "stance": "compromise",
+            "claim_reference": f"{previous_name}의 실패 시나리오와 책임자 요구",
+            "content": (
+                f"{previous_name}의 지적은 수용하되, '{requirement}'을 무기한 보류하면 고객 검증 자체가 불가능해집니다. "
+                f"따라서 위험 조건에서는 사람 승인으로 전환하고, 재처리·취소·환불 상태를 함께 추적하는 제한된 파일럿으로 합의해야 합니다."
+            ),
+        })
+    return dialogues
+
+
+def _build_mock_risks(personas: list[dict[str, Any]], context: dict[str, Any]) -> list[dict[str, Any]]:
+    risks: list[dict[str, Any]] = []
+    requirements = context["requirements"] or ["MVP 범위와 인수 기준"]
+    for index, persona in enumerate(personas[:3]):
+        objections = persona.get("likely_objections") or []
+        description = str(objections[0]) if objections else f"{requirements[index % len(requirements)]}의 검증 기준이 부족합니다."
+        risks.append({
+            "title": f"{persona.get('name', f'이해관계자 {index + 1}')}의 핵심 우려",
+            "description": description,
+            "related_requirement": requirements[index % len(requirements)],
+            "raised_by": str(persona.get("name") or ""),
+            "participants": [
+                str(persona.get("name") or ""),
+                str(personas[index - 1].get("name") or "") if personas else "",
+            ],
+            "emerges_after": (len(personas[:10]) * 2) + index + 1,
+        })
+    return risks
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    """Extract one JSON object from an LLM response without accepting prose."""
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.split("\n", 1)[1] if "\n" in candidate else ""
+        candidate = candidate.rsplit("```", 1)[0].strip()
+
+    start = candidate.find("{")
+    if start < 0:
+        raise ValueError("Live LLM response did not contain a JSON object")
+    decoded, _ = json.JSONDecoder().raw_decode(candidate[start:])
+    if not isinstance(decoded, dict):
+        raise ValueError("Live LLM response must be a JSON object")
+    return decoded
+
+
+async def _build_live_dialogues(
+    personas: list[dict[str, Any]], context: dict[str, Any]
+, *, session_state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Generate a three-round debate where each round receives prior turns."""
+    active_personas = personas[:10]
+    persona_context = "\n".join(
+        "- {name} ({role}): 관점={angle}; 예상 이의={objections}".format(
+            name=persona.get("name", f"Stakeholder {index + 1}"),
+            role=persona.get("role", "Stakeholder"),
+            angle=persona.get("review_angle", "PRD 실행 가능성"),
+            objections=" / ".join(persona.get("likely_objections") or ["명확한 인수 기준 필요"]),
+        )
+        for index, persona in enumerate(active_personas)
+    )
+    requirements = "\n".join(f"- {item}" for item in context["requirements"][:6]) or "- MVP 범위와 인수 기준"
+    persona_by_name = {
+        str(persona.get("name")): persona
+        for persona in active_personas
+        if persona.get("name")
+    }
+
+    def format_history(turns: list[dict[str, Any]]) -> str:
+        return "\n".join(
+            f"{index + 1}. {turn['speaker']} → {turn['reply_to']} [{turn['stance']}]: "
+            f"{turn['content']} (인용 주장: {turn['claim_reference']})"
+            for index, turn in enumerate(turns)
+        )
+
+    async def generate_round(round_number: int, history: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        prior_discussion = format_history(history) or "아직 이전 발언이 없습니다."
+        response_rule = (
+            "각 참여자는 topic을 대상으로 자신의 검증 관점을 제기하고, claim_reference에는 현재 제품 가설 또는 요구사항을 구체적으로 적으세요."
+            if round_number == 1
+            else "각 참여자는 반드시 이전 토론의 다른 참여자 한 명을 `reply_to`로 지정하고, 그 사람의 실제 주장 한 가지를 `claim_reference`에 인용해 반박·수정·조건부 수용하세요. 독립 의견은 금지합니다."
+        )
+        risk_rule = (
+            "Round 3에서만, 최소 두 참여자의 상충된 주장 때문에 새롭게 확인된 리스크를 3~6개 도출하세요."
+            if round_number == 3
+            else "risks는 빈 배열로 반환하세요."
+        )
+        prompt = f"""
+당신은 제품 검증 토론의 진행자입니다. 이번에는 Round {round_number}만 생성하세요.
+
+제품: {context['product_name']}
+문제: {context['problem']}
+해결 가설: {context['solution']}
+요구사항:
+{requirements}
+
+Reality Seeds:
+{persona_context}
+
+이전 토론 로그:
+{prior_discussion}
+
+규칙:
+1. Reality Seed마다 정확히 한 발언을 생성합니다.
+2. {response_rule}
+3. `content`는 대상의 이름과 구체적 정책·수치·범위를 직접 언급하고, 반대 근거와 수정안을 모두 포함한 한국어 2~3문장이어야 합니다.
+4. {risk_rule}
+
+JSON만 반환하세요:
+{{"dialogues":[{{"speaker":"Reality Seed의 정확한 이름","role":"역할","reply_to":"대상 이름 또는 topic","round":{round_number},"stance":"challenge|support|compromise","claim_reference":"상대의 구체적 주장 요약","content":"직접 반박 또는 보완 발언"}}],"risks":[{{"title":"토론 끝에 도출된 리스크","description":"상충 주장과 발생 조건","related_requirement":"관련 요구사항","raised_by":"제기자 이름","participants":["상충한 두 참여자 이름"]}}]}}
+"""
+        response = await get_llm_service().chat([
+            {"role": "system", "content": "Return only valid JSON. Generate a grounded Korean multi-agent debate, not a list of independent opinions."},
+            {"role": "user", "content": prompt},
+        ])
+        data = _extract_json_object(response)
+        raw_dialogues = data.get("dialogues")
+        if not isinstance(raw_dialogues, list):
+            raise ValueError(f"Live LLM round {round_number} did not include dialogues")
+
+        previous_speakers = {turn["speaker"] for turn in history}
+        turns: list[dict[str, Any]] = []
+        seen_speakers: set[str] = set()
+        for item in raw_dialogues:
+            if not isinstance(item, dict):
+                continue
+            speaker = str(item.get("speaker") or "").strip()
+            if speaker not in persona_by_name or speaker in seen_speakers:
+                continue
+            reply_to = str(item.get("reply_to") or "").strip()
+            if round_number == 1:
+                reply_to = "topic"
+            elif reply_to not in previous_speakers or reply_to == speaker:
+                continue
+            claim_reference = str(item.get("claim_reference") or "").strip()
+            content = str(item.get("content") or "").strip()
+            stance = str(item.get("stance") or "").strip()
+            if not claim_reference or not content or stance not in {"challenge", "support", "compromise"}:
+                continue
+            turns.append({
+                "speaker": speaker,
+                "role": str(item.get("role") or persona_by_name[speaker].get("role") or "Stakeholder"),
+                "reply_to": reply_to,
+                "round": round_number,
+                "stance": stance,
+                "claim_reference": claim_reference,
+                "content": content,
+            })
+            seen_speakers.add(speaker)
+
+        if set(persona_by_name) != seen_speakers:
+            raise ValueError(f"Live LLM round {round_number} did not produce one valid reply for every Reality Seed")
+        raw_risks = data.get("risks")
+        return turns, raw_risks if isinstance(raw_risks, list) else []
+
+    dialogues: list[dict[str, Any]] = []
+    raw_risks: list[dict[str, Any]] = []
+    for round_number in range(1, 4):
+        turns, round_risks = await generate_round(round_number, dialogues)
+        dialogues.extend(turns)
+        if round_number == 3:
+            raw_risks = round_risks
+
+    risks = []
+    for index, item in enumerate(raw_risks[:6]):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        description = str(item.get("description") or "").strip()
+        raised_by = str(item.get("raised_by") or "").strip()
+        participants = [name for name in item.get("participants", []) if name in persona_by_name] if isinstance(item.get("participants"), list) else []
+        if not title or not description or len(participants) < 2:
+            continue
+        risks.append({
+            "title": title,
+            "description": description,
+            "related_requirement": str(item.get("related_requirement") or "").strip(),
+            "raised_by": raised_by if raised_by in persona_by_name else participants[0],
+            "participants": participants,
+            "emerges_after": len(dialogues) - len(active_personas) + index + 1,
+        })
+    if not risks:
+        raise ValueError("Live LLM did not derive risks from the final debate round")
+    session_state["derived_risks"] = risks
+    return dialogues
+
+
+def _build_mock_report(*, session_state: dict[str, Any]) -> str:
+    context = _simulation_context(session_state=session_state)
+    events = session_state.get("simulation_events") or []
+    posts = [event for event in events if event.get("type") == "agent_post"]
+    run_id = session_state.get("simulation_run_id", "unknown")
+    mode = session_state.get("last_simulation_mode", "mock")
+    if not posts:
+        return "# MiroFish 시뮬레이션 검증 보고서\n\n이번 실행에서 수집된 토론 이벤트가 없습니다. 시뮬레이션을 다시 실행한 뒤 보고서를 생성해주세요."
+
+    findings = "\n".join(
+        f"- **{post.get('agent_name', 'Stakeholder')} ({post.get('agent_type', 'Unknown')})**: {post.get('content', '')}"
+        for post in posts
+    )
+    requirements = context["requirements"] or ["MVP 범위와 인수 기준"]
+    actions = "\n".join(f"- {item}" for item in requirements[:5])
+    return (
+        f"# MiroFish 시뮬레이션 검증 보고서\n\n"
+        f"- **실행 ID:** `{run_id}`\n- **실행 모드:** `{mode}`\n- **제품:** {context['product_name']}\n"
+        f"- **수집된 토론 이벤트:** {len(posts)}건\n\n"
+        f"## 검증한 문제와 해결 가설\n- 문제: {context['problem']}\n- 해결 가설: {context['solution']}\n\n"
+        f"## 이번 실행의 이해관계자 발언 근거\n{findings}\n\n"
+        f"## 다음 검증 우선순위\n{actions}\n\n"
+        f"## 판정\n이 보고서는 위 실행 ID에서 수집한 {len(posts)}건의 토론 이벤트를 바탕으로 생성되었습니다. "
+        f"`mock` 또는 `live_fallback` 모드라면 실제 MiroFish 엔진 호출 결과가 아닌 현재 PRD와 Reality Seeds를 입력으로 한 로컬 시뮬레이션입니다."
+    )
+
+
+async def _build_live_report(*, session_state: dict[str, Any]) -> str:
+    """Generate a report from the dialogue stored for the current live LLM run."""
+    context = _simulation_context(session_state=session_state)
+    posts = [event for event in session_state.get("simulation_events", []) if event.get("type") == "agent_post"]
+    if not posts:
+        raise ValueError("No live simulation dialogue was recorded")
+    discussion = "\n".join(
+        f"- Round {post.get('round', '?')} | {post.get('agent_name', 'Stakeholder')} → "
+        f"{post.get('reply_to', 'topic')} [{post.get('stance', 'statement')}]: "
+        f"{post.get('content', '')} (인용: {post.get('claim_reference', '없음')})"
+        for post in posts
+    )
+    prompt = f"""
+아래는 한 번의 Live LLM 시뮬레이션에서 생성된 실제 토론 로그입니다. 이 로그만 근거로 한국어 Markdown 검증 보고서를 작성하세요.
+
+실행 ID: {session_state.get('simulation_run_id', 'unknown')}
+제품: {context['product_name']}
+문제: {context['problem']}
+해결 가설: {context['solution']}
+토론 로그:
+{discussion}
+
+반드시 다음 섹션을 포함하세요: 핵심 합의, 주요 리스크, 요구사항 보완, 다음 검증 우선순위. 로그에 없는 사실은 단정하지 마세요.
+"""
+    return await get_llm_service().chat([
+        {"role": "system", "content": "You write concise Korean Markdown product validation reports grounded only in supplied evidence."},
+        {"role": "user", "content": prompt},
+    ])
+async def _simulation_event_generator(
+    mode: str = "mock",
+    reason: str | None = None,
+    dialogues: list[dict[str, Any]] | None = None,
+ *, session_state: dict[str, Any]) -> AsyncGenerator[str, None]:
     """Rich SSE stream for simulation with 30+ dynamic stakeholder personas and real-time graph growth sync."""
     import json
     import asyncio
     from datetime import datetime, timezone
 
-    yield f'data: {json.dumps({"type": "mode_check", "mode": mode, "reason": reason})}\n\n'
-    if reason:
-        yield f'data: {json.dumps({"type": "system_log", "content": f"🚨 Live Engine Fallback: {reason}", "timestamp": datetime.now(timezone.utc).isoformat(), "mode": mode})}\n\n'
-    def _ts(): return datetime.now(timezone.utc).isoformat()
-    
-    # 1. session_state에서 stakeholder_personas 가져오기 (30명)
-    raw_personas = session_state.get("stakeholder_personas", [])
-    if not raw_personas:
-        # Fallback 30 Stakeholders
-        raw_personas = [
-            {"name": "PM 김철수", "role": "Product Manager", "review_angle": "비즈니스 가치 극대화 및 기한 준수 평가", "likely_objections": ["출시 지연"]},
-            {"name": "부PM 이영희", "role": "Associate PM", "review_angle": "세부 명세 구체성", "likely_objections": ["모호성"]},
-            {"name": "개발 아키텍트 박팀장", "role": "Lead Architect", "review_angle": "시스템 안정성", "likely_objections": ["기술 부채"]},
-            {"name": "시스템 아키텍트 임정민", "role": "System Architect A", "review_angle": "인프라 사양", "likely_objections": ["하드웨어 스펙"]},
-            {"name": "시스템 아키텍트 조경진", "role": "System Architect B", "review_angle": "트랜잭션 이중화", "likely_objections": ["데이터 락"]},
-            {"name": "보안감사관 이지훈", "role": "Security Auditor", "review_angle": "PII 개인정보 비식별화", "likely_objections": ["영업비밀 유출"]},
-            {"name": "보안엔지니어 정민우", "role": "Security Engineer A", "review_angle": "마스킹 필터링 속도", "likely_objections": ["필터 병목"]},
-            {"name": "보안엔지니어 강동호", "role": "Security Engineer B", "review_angle": "외부 공격 취약점", "likely_objections": ["인젝션 리스크"]},
-            {"name": "법무팀장 최윤서", "role": "Legal Counsel", "review_angle": "책임 소재 분석", "likely_objections": ["배상 한도"]},
-            {"name": "법률대리인 신재현", "role": "Legal Counsel B", "review_angle": "약관 수정", "likely_objections": ["노동법 위반"]},
-            {"name": "CFO 정우진", "role": "Financial Director", "review_angle": "운영비용 ROI", "likely_objections": ["API 비용"]},
-            {"name": "재무팀원 송미경", "role": "Financial Analyst", "review_angle": "CAPEX 감가상각", "likely_objections": ["예산 초과"]},
-            {"name": "QA매니저 강혜원", "role": "Quality Assurance Lead", "review_angle": "RAG 환각율 통제", "likely_objections": ["오답률 위험"]},
-            {"name": "QA엔지니어 조현식", "role": "QA Engineer A", "review_angle": "스트레스 유효성", "likely_objections": ["시나리오 누수"]},
-            {"name": "QA테스터 김태호", "role": "QA Engineer B", "review_angle": "모바일 UI 테스트", "likely_objections": ["구형 디바이스"]},
-            {"name": "QA테스터 윤아름", "role": "QA Engineer C", "review_angle": "실시간 데이터 검증", "likely_objections": ["대량 로그 렉"]},
-            {"name": "SRE리드 한상민", "role": "SRE Lead", "review_angle": "가용망 가동 시간 SLA", "likely_objections": ["Failover 장애"]},
-            {"name": "SRE엔지니어 윤석호", "role": "SRE Engineer B", "review_angle": "그라파나 연동", "likely_objections": ["로그 누락"]},
-            {"name": "디자이너 정희채", "role": "UI/UX Designer A", "review_angle": "대시보드 편의성", "likely_objections": ["복잡성 가중"]},
-            {"name": "디자이너 박소율", "role": "UI/UX Designer B", "review_angle": "명암비 가이드", "likely_objections": ["일관성 결여"]},
-            {"name": "프론트엔드 한아름", "role": "Frontend Engineer A", "review_angle": "차트 렌더링 성능", "likely_objections": ["메인 스레드 렉"]},
-            {"name": "프론트엔드 서지원", "role": "Frontend Engineer B", "review_angle": "컴포넌트 리렌더링", "likely_objections": ["메모리 누수"]},
-            {"name": "프론트엔드 김민식", "role": "Frontend Engineer C", "review_angle": "반응형 가시성", "likely_objections": ["구형 모바일 깨짐"]},
-            {"name": "백엔드 김도현", "role": "Backend Engineer A", "review_angle": "FastAPI 비동기", "likely_objections": ["트랜잭션 락"]},
-            {"name": "백엔드 임채원", "role": "Backend Engineer B", "review_angle": "벡터 DB RAG 튜닝", "likely_objections": ["RAG 임베딩 렉"]},
-            {"name": "백엔드 오정훈", "role": "Backend Engineer C", "review_angle": "로깅 API 셋업", "likely_objections": ["DB I/O 지연"]},
-            {"name": "영업팀장 오세현", "role": "B2B Sales Lead", "review_angle": "세일즈 경쟁력", "likely_objections": ["바이어 이탈"]},
-            {"name": "CS/HR 서진우", "role": "CS & HR Manager", "review_angle": "CS 직무 업스킬링", "likely_objections": ["노조 반발"]},
-            {"name": "셀러대표 민경아", "role": "Seller Representative A", "review_angle": "정산 손실 차단성", "likely_objections": ["오정산 위험"]},
-            {"name": "셀러대표 김동현", "role": "Seller Representative B", "review_angle": "모바일 알림 속도", "likely_objections": ["정산 지연"]}
+    run_id = session_state["run_id"]
+    session_state["simulation_run_id"] = run_id
+    session_state["simulation_events"] = []
+    session_state["last_simulation_mode"] = mode
+    session_state["last_simulation_reason"] = reason
+
+    def emit(event: dict[str, Any]) -> str:
+        event["run_id"] = run_id
+        event["mode"] = mode
+        event.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+        session_state["simulation_events"].append(event)
+        return f"data: {json.dumps(event)}\n\n"
+
+    raw_personas = session_state.get("stakeholder_personas") or MOCK_STAKEHOLDER_PANEL
+    context = _simulation_context(session_state=session_state)
+    dialogues = dialogues or _build_mock_dialogues(raw_personas, context)
+    risk_items = session_state.get("derived_risks") or _build_mock_risks(raw_personas, context)
+    stakeholder_nodes: list[dict[str, Any]] = []
+    stakeholder_ids: dict[str, str] = {}
+    for dialogue in dialogues:
+        name = str(dialogue["speaker"])
+        role = str(dialogue["role"])
+        if name in stakeholder_ids:
+            continue
+        node_id = f"stakeholder-{len(stakeholder_nodes)}"
+        stakeholder_ids[name] = node_id
+        stakeholder_nodes.append({
+            "id": node_id,
+            "group": len(stakeholder_nodes) % 4,
+            "label": name,
+            "role": role,
+            "summary": f"{role} 관점의 Reality Seed 참여자",
+            "goal": "다른 참여자와 쟁점을 검증하고 실행 가능한 합의를 도출합니다.",
+        })
+    product_node = {
+        "id": "topic",
+        "group": 6,
+        "label": context["product_name"],
+        "role": "시뮬레이션 주제",
+        "summary": context["problem"],
+        "goal": "참여자 토론을 통해 핵심 가설과 리스크를 검증합니다.",
+    }
+    risk_nodes = [
+        {
+            "id": f"risk-{index}",
+            "group": 4,
+            "label": str(risk["title"]),
+            "role": "새롭게 도출된 리스크",
+            "summary": str(risk["description"]),
+            "goal": f"{risk.get('related_requirement') or '관련 요구사항'}의 보완과 검증",
+        }
+        for index, risk in enumerate(risk_items)
+    ]
+    connection_counts: dict[tuple[str, str], int] = {}
+    visible_risk_ids: set[str] = set()
+
+    def add_connection(first_id: str, second_id: str) -> None:
+        key = tuple(sorted((first_id, second_id)))
+        connection_counts[key] = connection_counts.get(key, 0) + 1
+
+    def graph_snapshot() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        visible_nodes = stakeholder_nodes + [product_node] + [
+            node for node in risk_nodes if node["id"] in visible_risk_ids
+        ]
+        return visible_nodes, [
+            {
+                "source": source,
+                "target": target,
+                "weight": count,
+                "label": f"{count}회 토론",
+            }
+            for (source, target), count in connection_counts.items()
         ]
 
-    # 2. 동적 전문가 노드 리스트 구성 (30인)
-    dynamic_expert_nodes = []
-    def get_group_by_role(role: str) -> int:
-        role_lower = role.lower()
-        if any(r in role_lower for r in ["pm", "architect", "engineer", "developer", "designer", "frontend", "backend"]):
-            return 0
-        elif any(r in role_lower for r in ["auditor", "counsel", "legal", "lawyer"]):
-            return 1
-        elif any(r in role_lower for r in ["financial", "cfo", "analyst", "qa", "test", "sre"]):
-            return 2
-        else:
-            return 3
+    yield emit({"type": "mode_check", "reason": reason})
+    initial_nodes, initial_links = graph_snapshot()
+    yield emit({
+        "type": "system_log",
+        "content": f"{mode} simulation started for {context['product_name']}. Run ID: {run_id}",
+        "nodes": initial_nodes,
+        "links": initial_links,
+        "progress": 0.02,
+    })
+    for index, dialogue in enumerate(dialogues, start=1):
+        name = str(dialogue["speaker"])
+        role = str(dialogue["role"])
+        content = str(dialogue["content"])
+        speaker_id = stakeholder_ids[name]
+        reply_to = str(dialogue.get("reply_to") or "topic")
+        reply_id = stakeholder_ids.get(reply_to, "topic")
+        add_connection(reply_id, speaker_id)
+        for risk_index, risk in enumerate(risk_items):
+            if int(risk.get("emerges_after") or len(dialogues) + 1) != index:
+                continue
+            risk_id = risk_nodes[risk_index]["id"]
+            visible_risk_ids.add(risk_id)
+            participants = risk.get("participants") or [risk.get("raised_by")]
+            connected_participant = False
+            if isinstance(participants, list):
+                for participant in participants:
+                    participant_id = stakeholder_ids.get(str(participant))
+                    if participant_id:
+                        add_connection(participant_id, risk_id)
+                        connected_participant = True
+            if not connected_participant:
+                add_connection(speaker_id, risk_id)
+            add_connection(risk_id, "topic")
+        visible_nodes, visible_links = graph_snapshot()
+        yield emit({
+            "type": "agent_post",
+            "agent_name": name,
+            "agent_type": role,
+            "content": content,
+            "reply_to": reply_to,
+            "round": dialogue.get("round"),
+            "stance": dialogue.get("stance"),
+            "claim_reference": dialogue.get("claim_reference"),
+            "nodes": visible_nodes,
+            "links": visible_links,
+            "progress": 0.05 + (0.9 * index / len(dialogues)),
+        })
+        await asyncio.sleep(0.55)
+    final_nodes, final_links = graph_snapshot()
+    yield emit({"type": "simulation_complete", "content": "Simulation completed.", "nodes": final_nodes, "links": final_links, "progress": 1.0})
+    return
 
-    for i, p in enumerate(raw_personas):
-        node_id = f"S_{i}"
-        role = p.get("role", "Expert")
-        group = get_group_by_role(role)
-        label = p.get("name", f"Stakeholder {i}").split(" (")[0]
-        dynamic_expert_nodes.append({"id": node_id, "group": group, "label": label})
 
-    # 기존 ALL_MOCK_NODES 중 12명의 전문가를 제외하고 나머지 리스크/요구사항/솔루션/마일스톤 노드 병합
-    non_expert_nodes = [n for n in ALL_MOCK_NODES if not n["id"] in [
-        "PM_Kim", "Sales_Oh", "HR_Seo", "Sec_Lee", "Legal_Choi", "Arch_Park", 
-        "CFO_Woo", "QA_Kang", "SRE_Han", "FE_Han", "Seller_Min", "Design_Jung"
-    ]]
-    final_nodes = dynamic_expert_nodes + non_expert_nodes
+async def _live_llm_event_generator(reason: str | None = None, *, session_state: dict[str, Any]) -> AsyncGenerator[str, None]:
+    """Run the current PRD through the configured LLM when no MiroFish engine is reachable."""
+    context = _simulation_context(session_state=session_state)
+    personas = session_state.get("stakeholder_personas") or []
+    try:
+        dialogues = await _build_live_dialogues(personas, context, session_state=session_state)
+    except Exception as exc:
+        session_state["mode"] = "live_error"
+        payload = {
+            "type": "simulation_error",
+            "mode": "live_error",
+            "reason": f"Live LLM simulation failed: {exc}",
+            "content": "Live ON 상태에서 Mock 결과로 대체하지 않았습니다. API 키, 모델, 사용 한도를 확인한 뒤 다시 시도해주세요.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        yield f"data: {json.dumps(payload)}\n\n"
+        return
 
-    # 3. 링크(Edge) 동적 맵핑
-    persona_id_mapping = {
-        "PM_Kim": [f"S_{i}" for i, p in enumerate(raw_personas) if "pm" in p.get("role", "").lower()],
-        "Arch_Park": [f"S_{i}" for i, p in enumerate(raw_personas) if "architect" in p.get("role", "").lower() or "backend" in p.get("role", "").lower()],
-        "Sec_Lee": [f"S_{i}" for i, p in enumerate(raw_personas) if "security" in p.get("role", "").lower() or "auditor" in p.get("role", "").lower()],
-        "Legal_Choi": [f"S_{i}" for i, p in enumerate(raw_personas) if "legal" in p.get("role", "").lower() or "counsel" in p.get("role", "").lower()],
-        "CFO_Woo": [f"S_{i}" for i, p in enumerate(raw_personas) if "financial" in p.get("role", "").lower() or "cfo" in p.get("role", "").lower() or "analyst" in p.get("role", "").lower()],
-        "QA_Kang": [f"S_{i}" for i, p in enumerate(raw_personas) if "qa" in p.get("role", "").lower() or "test" in p.get("role", "").lower()],
-        "SRE_Han": [f"S_{i}" for i, p in enumerate(raw_personas) if "sre" in p.get("role", "").lower() or "reliability" in p.get("role", "").lower()],
-        "Design_Jung": [f"S_{i}" for i, p in enumerate(raw_personas) if "designer" in p.get("role", "").lower() or "design" in p.get("role", "").lower()],
-        "FE_Han": [f"S_{i}" for i, p in enumerate(raw_personas) if "frontend" in p.get("role", "").lower() or "client" in p.get("role", "").lower()],
-        "Sales_Oh": [f"S_{i}" for i, p in enumerate(raw_personas) if "sales" in p.get("role", "").lower() or "영업" in p.get("role", "").lower()],
-        "HR_Seo": [f"S_{i}" for i, p in enumerate(raw_personas) if "hr" in p.get("role", "").lower() or "cs" in p.get("role", "").lower() or "manager" in p.get("role", "").lower()],
-        "Seller_Min": [f"S_{i}" for i, p in enumerate(raw_personas) if "seller" in p.get("role", "").lower() or "representative" in p.get("role", "").lower()]
-    }
-
-    # 폴백 매핑
-    for old_id, new_list in list(persona_id_mapping.items()):
-        if not new_list:
-            if old_id in ["PM_Kim", "Arch_Park", "Design_Jung", "FE_Han"]:
-                fallback_grp = 0
-            elif old_id in ["Sec_Lee", "Legal_Choi"]:
-                fallback_grp = 1
-            elif old_id in ["CFO_Woo", "QA_Kang", "SRE_Han"]:
-                fallback_grp = 2
-            else:
-                fallback_grp = 3
-            persona_id_mapping[old_id] = [n["id"] for n in dynamic_expert_nodes if n["group"] == fallback_grp]
-
-    final_links = []
-    link_counts = {}
-    
-    for link in ALL_MOCK_LINKS:
-        s = link["source"]
-        t = link["target"]
-        
-        if s in persona_id_mapping:
-            lst = persona_id_mapping[s]
-            cnt = link_counts.get(s, 0)
-            s_new = lst[cnt % len(lst)]
-            link_counts[s] = cnt + 1
-        else:
-            s_new = s
-            
-        if t in persona_id_mapping:
-            lst = persona_id_mapping[t]
-            cnt = link_counts.get(t, 0)
-            t_new = lst[cnt % len(lst)]
-            link_counts[t] = cnt + 1
-        else:
-            t_new = t
-            
-        final_links.append({"source": s_new, "target": t_new})
-
-    # 4. 대화 발언자 치환을 위한 매핑 사전 구축
-    def get_actual_persona_name(old_name: str) -> tuple[str, str]:
-        mapping_key = None
-        if "PM" in old_name or "김철수" in old_name:
-            mapping_key = "PM_Kim"
-        elif "아키텍트" in old_name or "박팀장" in old_name:
-            mapping_key = "Arch_Park"
-        elif "보안" in old_name or "이지훈" in old_name:
-            mapping_key = "Sec_Lee"
-        elif "법무" in old_name or "최윤서" in old_name:
-            mapping_key = "Legal_Choi"
-        elif "CFO" in old_name or "정우진" in old_name:
-            mapping_key = "CFO_Woo"
-        elif "QA" in old_name or "강혜원" in old_name:
-            mapping_key = "QA_Kang"
-        elif "SRE" in old_name or "한상민" in old_name:
-            mapping_key = "SRE_Han"
-        elif "디자이너" in old_name or "정희채" in old_name:
-            mapping_key = "Design_Jung"
-        elif "프론트" in old_name or "한아름" in old_name:
-            mapping_key = "FE_Han"
-        elif "영업" in old_name or "오세현" in old_name:
-            mapping_key = "Sales_Oh"
-        elif "CS/HR" in old_name or "서진우" in old_name:
-            mapping_key = "HR_Seo"
-        elif "셀러" in old_name or "민경아" in old_name:
-            mapping_key = "Seller_Min"
-            
-        if mapping_key and mapping_key in persona_id_mapping:
-            target_id = persona_id_mapping[mapping_key][0]
-            target_node = next((n for n in dynamic_expert_nodes if n["id"] == target_id), None)
-            if target_node:
-                idx = int(target_id.split("_")[1])
-                p = raw_personas[idx]
-                return target_node["label"], p.get("role", "Expert")
-                
-        return old_name, "Expert"
-
-    # 대화 단계
-    dialogues = [
-        ("PM 김철수", "Product Manager", "이번 Simply AI Agent는 기업용 레거시와 연동하여 주문 조회, 주문 취소, 50만원 이하 자율 환불 액션을 완수해야 합니다. 상담원 개입을 최소화하여 목표 TCR(업무완결율) 40% 이상을 기한 내 달성합시다."),
-        ("CS/HR 서진우", "CS & HR Manager", "김철수 PM님, 현장을 전혀 모르는 안일한 발상입니다! AI가 TCR 40%를 달성하면 CS 상담원들의 직무가 축소될 것이 뻔한데 CS 노조가 가만히 있겠습니까? 당장 내일 아침 본사 로비에서 구조조정 규탄 피켓 시위를 벌이겠다고 강경하게 경고해 왔습니다. 현장 합의 없는 도입은 전면 사보타주만 부를 뿐입니다!"),
-        ("영업팀장 오세현", "B2B Sales Lead", "서 매니저님, 지금 노조 시위 때문에 프로젝트를 지연시키자는 겁니까? 이번 6월 BMT(기술검증)를 통과하지 못하면 당장 연간 25억 규모의 대형 고객사 3곳과의 거래 딜이 즉시 무산됩니다. B2B 비즈니스 생존보다 시위 방어가 더 중요합니까?"),
-        ("CS/HR 서진우", "CS & HR Manager", "오세현 팀장님, 단기 실적에 눈이 멀어 곪아 터질 폭탄을 방치하는 게 더 위험합니다! CS 상담원들이 반발해서 RAG 입력 데이터 분류 태그를 엉망으로 입력하거나 고의로 피드백 점수를 흐려놓으면, 전체 AI 응답 정확도가 30% 이하로 곤두박질칠 겁니다. 그때 발생하는 유무형의 신뢰 손실은 25억이 아니라 250억으로도 못 메웁니다!"),
-        ("보안감사관 이지훈", "Security Auditor", "두 분 싸움보다 더 심각한 컴플라이언스 붕괴 위험이 있습니다. 외부 LLM API 통신 시 계좌번호와 주민번호 같은 개인식별정보(PII) 유출 위험은 치명적입니다. 50ms 이내 초고속 PII 마스킹 차단율 100%와 데이터 미저장(Zero-Retention) 조건이 실측 입증되지 않으면 금융감독원 보안성 심의에서 바로 반려되어 서비스 자체가 셧다운됩니다!"),
-        ("아키텍트 박팀장", "Lead Architect", "이 감사관님, 50ms 이내 100% 차단은 물리적으로 불가능합니다! API 게이트웨이 전단에 다중 정규식 필터와 검출 모델을 동기식으로 끼워 넣으면 프록시 홉 오버헤드만 최소 600ms가 추가됩니다. 결과적으로 전체 E2E 레이턴시가 목표치인 1.5초를 훌쩍 넘어 2.5초에 달할 텐데, 화면이 렉 걸려 굳어버리는 서비스를 유저가 쓰겠습니까?"),
-        ("프론트 한아름", "Frontend Engineer", "맞습니다! 동기식 전처리 필터링이 연동되면 화면이 3초 이상 멈춰 서게 되고, 답답한 사용자들이 새로고침을 연타해서 API 커넥션이 폭증하고 웹소켓 서버가 크래시 날 겁니다. 속도가 무너진 보안은 사용자 이탈만 초래하는 UX 파괴일 뿐입니다!"),
-        ("보안감사관 이지훈", "Security Auditor", "한아름 엔지니어님, 화면 렉보다 금융 컴플라이언스 위반으로 인한 영업정지 처분과 과징금 10억원이 훨씬 치명적입니다! 보안 필터링은 타협 불가능한 절대 의무입니다. 기술적 어려움은 엔지니어링 리소스를 갈아 넣어서라도 50ms 기준을 지켜내야 할 영역입니다!"),
-        ("법무팀장 최윤서", "Legal Counsel", "보안뿐만 아니라 책임 귀속도 엉망입니다. AI 판단 오작동으로 50만원 이하 자율 환불이 잘못 집행되어 대금이 무단 유출되었을 때, 그 귀책사유와 민사상 배상 책임 기준이 PRD에 전혀 명시되어 있지 않습니다. 인간이 최종 통제하는 승인 대기 큐(HITL)가 차단 장치로 강제되지 않는다면, 법무팀은 배상 계약 조항에 절대 승인 도장을 찍을 수 없습니다!"),
-        ("CFO 정우진", "Financial Director", "재무 관점에서도 이 사업은 전면 보류해야 합니다. 박팀장님이 설계하신 PII 필터용 프록시 서버 이중화 구성과 고성능 전처리 LLM 호출 토큰 비용을 계산해보니 API 비용만 월 1,800만원이 찍힙니다. 기존 CS 인력 감축에 따른 운영비 절감액 1,100만원을 훌쩍 초과하는데, 배보다 배꼽이 더 큰 적자 프로젝트를 왜 승인해야 합니까?"),
-        ("SRE리드 한상민", "SRE Lead", "정 이사님, 단순 호출 비용만 보면 적자처럼 보이지만 가용망이 무너져서 발생하는 서비스 장애로 인한 단 1시간의 매출 손실이 평균 8,500만원입니다! 가용성 SLA 99.9%를 수호하기 위한 프록시 이중화 인프라 투자는 적자가 아닌, 서비스 생존을 위한 최소한의 안전 보험입니다!"),
-        ("QA매니저 강혜원", "Quality Assurance Lead", "더 큰 문제는 데이터 정확도입니다. 고객사 매뉴얼의 HWP 한글 문서 내 '표(Table)' 구조를 파싱할 때 RAG 오인식률이 현재 18%에 달합니다. 18% 확률로 AI가 잘못된 환불 규정을 읽어서 50만원짜리 오환불을 남발하면 그 재정적 손실과 고객 불만을 어떻게 감당합니까?"),
-        ("셀러대표 민경아", "Seller Representative", "잠깐만요! RAG 오인식으로 잘못 환불된 돈을 입점 셀러인 우리더러 떠안으라는 소리입니까? 50만원 이하라고 셀러 확인도 없이 제멋대로 돈을 빼내 가다니요! 이런 정산 먹튀 플랫폼이라면 당장 저희 셀러 연합 450개 업체가 일제히 탈퇴하고 경쟁사로 이탈하겠습니다. 법적 소송도 불사할 것입니다!"),
-        ("CFO 정우진", "Financial Director", "민경아 대표님 지적이 백번 맞습니다. 잘못 환불된 대금을 플랫폼 재무 재원으로 보전해주기 시작하면 당사 재무 리스크가 걷잡을 수 없이 커집니다. 차라리 자율 환불 임계 한도를 50만원이 아니라 1만원 수준으로 대폭 축소하는 게 유일한 안전장치입니다."),
-        ("영업팀장 오세현", "B2B Sales Lead", "정 이사님! 한도를 1만원으로 낮추면 대형 바이어들이 'CS 자동화 효과가 전혀 없다'며 즉시 도입을 철회합니다. B2B 시장에서 50만원 임계값은 경쟁사 대비 독점적 우위를 확보하는 유일한 무기인데, 이걸 버리라는 건 영업 접고 사업 접으라는 소리입니다!"),
-        ("셀러대표 민경아", "Seller Representative", "오팀장님 실적 채우자고 우리 피 같은 정산금을 담보로 삼으라는 겁니까? 최종 정산 및 환불 집행 승인 권한은 법적 거래 주체인 셀러에게 최종 귀속되어야 합니다. 그렇지 않으면 단 하루도 MiroFish 플랫폼에 물건을 올리지 않겠습니다!"),
-        ("아키텍트 박팀장", "Lead Architect", "보안 필터 오버헤드, RAG 표 파싱 환각, 재무 적자, 그리고 셀러 이탈 리스크까지 첩첩산중이군요. 완벽한 교착 상태입니다. PM님, 이 상태로는 개발도, 배포도 불가능합니다. 특단의 돌파구가 필요합니다."),
-        ("PM 김철수", "Product Manager", "모두 진정하십시오. 해결책이 있습니다. AI 신뢰도 판정 점수가 87% 미만이거나 환불 청구액이 10만원을 초과하는 거래는 AI가 자동 처리하지 않고, 실시간으로 분석 근거를 추출해 'HITL(Human-in-the-Loop) 승인 대기 큐'로 넘기는 절충안을 제안합니다. 최종 자율 한도는 50만원을 수호하되 안전 필터를 이중화하는 것입니다."),
-        ("디자이너 정희채", "UI/UX Designer", "그 아이디어 좋습니다! AI가 수집한 증빙 자료와 HWP 표 분석 요약을 3초 만에 검토할 수 있는 원클릭 스마트폰 알림톡 위젯 UI를 개발하겠습니다. 셀러나 상담원이 클릭 한 번으로 최종 승인하게 만들면 검토 오버헤드를 최소화하면서 거래 권한을 보장할 수 있습니다."),
-        ("셀러대표 민경아", "Seller Representative", "음, AI가 찾아낸 요약 보고서를 보고 우리가 직접 최종 터치를 해야만 돈이 나간다면 안심할 수 있겠네요. 3초 검토 방식이라면 장사 바쁜 와중에도 시간도 거의 안 뺏기고 납득할 만합니다. 찬성합니다."),
-        ("법무팀장 최윤서", "Legal Counsel", "최종 인출 주체를 AI가 아닌 인간(셀러)으로 격리하면 AI 오작동에 따른 플랫폼 면책 조항 계약이 성립됩니다. 법무팀에서도 이 조건이라면 배상 책임 리스크가 대부분 해소되므로 정식 승인을 낼 수 있습니다."),
-        ("아키텍트 박팀장", "Lead Architect", "기술적 리스크를 완화하기 위해 본 가동 전 4주간 'Shadow Mode(섀도우 테스트)' 단계를 정식 개발 로드맵에 반영합시다. 실제 DB 정산 취소는 막아둔 채, 백그라운드에서 실데이터 트래픽을 흘려 PII 필터 레이턴시와 RAG 정확도 통계를 실측 튜닝하는 완충 기간을 갖는 겁니다."),
-        ("프론트 한아름", "Frontend Engineer", "4주 섀도우 기간이 확보되면 화면 렉에 대한 UI 트릭을 적용하겠습니다. PII 필터 구동 시 화면에 '개인정보 안심 마스킹 적용 중...' 이라는 고급 Glassmorphism 스피너와 스켈레톤 애니메이션을 띄워 체감 대기 시간을 극적으로 단축시키고 사용자 이탈을 막겠습니다."),
-        ("QA매니저 강혜원", "Quality Assurance Lead", "섀도우 모드의 4주 실측 데이터를 확보할 수 있다면, HWP 표 파싱 RAG 모델을 집중 미세조정(Fine-Tuning)하여 런칭 시점 환각율을 확실히 3% 미만으로 통제할 수 있습니다. QA 관점에서도 이 로드맵이라면 자신 있게 승인할 수 있습니다!"),
-        ("보안감사관 이지훈", "Security Auditor", "보안실에서도 환영입니다. 4주간의 PII 50ms 필터링 보고서와 Zero-Retention 로깅 검증서를 미리 제출받아 보안성을 통제할 수 있다면, 정식 런칭 전에 금융권 ISMS-P 인증 승인을 사전 취득하는 스케줄이 가능해집니다."),
-        ("SRE리드 한상민", "SRE Lead", "SRE 부서에서도 4주간의 섀도우 모드 동안 로컬 Failover 스위칭 지연 시간을 250ms 이하로 튜닝해내겠습니다. 가상 트래픽 부하 테스트를 병행하여 트래픽 폭증 시의 인프라 스케일링 병목도 완벽히 잡겠습니다."),
-        ("영업팀장 오세현", "B2B Sales Lead", "좋습니다! 4주간 검증된 신뢰도 통계와 ISMS-P 인증서를 세일즈 피치덱에 얹는다면, BMT 기술 심의는 통과한 것이나 다름없습니다. 대기업 3곳과의 25억 계약 클로징도 당장 3분기 내 달성해 내겠습니다!"),
-        ("CS/HR 서진우", "CS & HR Manager", "CS 조직에서도 이 대시보드를 검토하는 상담원들을 'AI 판정 신뢰성 감사관(Auditor)'으로 업스킬링하는 HR 로드맵을 연계하겠습니다. 단순 콜센터 상담사에서 AI 기술 통제관으로 직무가 격상되는 것이니, CS 노조의 구조조정 불안감과 반발을 원천 봉쇄할 수 있습니다!"),
-        ("CFO 정우진", "Financial Director", "직무 업스킬링 비용과 HITL 간편 위젯 UI 개발비를 예산에 공식 반영하더라도, 4주 섀도우 검증 및 25억 딜이 확보된다면 전체 프로젝트 ROI는 35% 이상 흑자로 전환됩니다. 재무 승인 안을 통과시키겠습니다!"),
-        ("PM 김철수", "Product Manager", "팀 여러분, 격렬한 공방과 고밀도 토론 끝에 마스킹 전처리, HITL 대기 큐, 4주 Shadow Mode, 그리고 CS 직무 업스킬링 로드맵을 모두 통합한 완벽한 B2B 자율 대행 PRD의 최종 합의(Consensus)를 이뤘습니다. 정식 출시를 향해 힘차게 전진합시다!")
-    ]
-
-    total_steps = len(dialogues)
-    
-    # 실시간 노드/링크 누적 렌더링을 위한 step별 서브셋 구성 헬퍼
-    def get_progress_graph(step_idx):
-        expert_count = len(dynamic_expert_nodes)
-        non_expert_total = len(non_expert_nodes)
-        
-        # 비전문가 노드는 step_idx에 맞춰 점진적 증가
-        visible_non_expert_count = int(non_expert_total * (step_idx + 1) / total_steps)
-        visible_nodes = dynamic_expert_nodes + non_expert_nodes[:visible_non_expert_count]
-        
-        # 링크도 step_idx에 맞춰 점진적 증가
-        visible_link_count = int(len(final_links) * (step_idx + 1) / total_steps)
-        visible_links = final_links[:visible_link_count]
-        
-        return visible_nodes, visible_links
-
-    # 헬퍼 메세지 생성 함수
-    def _msg(t, c, n=None, at=None, p=None, nodes=None, links=None):
-        data = {"type": t, "content": c, "timestamp": _ts(), "mode": mode}
-        if n: 
-            data["agent_name"] = n
-        if at: 
-            data["agent_type"] = at
-        if p is not None: 
-            data["progress"] = p
-        if nodes: 
-            data["nodes"] = nodes
-        if links: 
-            data["links"] = links
-        return f'data: {json.dumps(data)}\n\n'
-
-    # 시뮬레이션 최초 가동 시 (전문가 30인 최초 배치 및 초기 링크들 포함)
-    yield _msg("system_log", "Initializing High-Density MiroFish Mock Agent Engine v13.0...", p=0.01)
-    await asyncio.sleep(0.3)
-    
-    init_nodes, init_links = get_progress_graph(0)
-    yield _msg("graph_update", "Stage 1: Business Vision & HR Resistance Initiated", p=0.05, nodes=init_nodes, links=init_links)
-    await asyncio.sleep(0.3)
-
-    # 대화 및 그래프 실시간 누적 빌드 루프
-    for idx, (old_speaker, old_role, content) in enumerate(dialogues):
-        prog = 0.05 + (0.90 * (idx + 1) / total_steps)
-        
-        speaker_name, speaker_role = get_actual_persona_name(old_speaker)
-        step_nodes, step_links = get_progress_graph(idx)
-        
-        yield _msg("agent_post", content, speaker_name, speaker_role, prog, nodes=step_nodes, links=step_links)
-        await asyncio.sleep(1.0) # 대화 템포 유지
-
-    # 5단계: 최종 합의 마무리
-    final_visible_nodes, final_visible_links = final_nodes, final_links
-    yield _msg("graph_update", "Stage 5: High-Density Mesh Graph & Final consensus Completed", p=0.95, nodes=final_visible_nodes, links=final_visible_links)
-    await asyncio.sleep(0.3)
-    
-    yield _msg("system_log", f"Mock Agent Swarm consensus reached. Mesh graph populated with {len(final_visible_nodes)} nodes and {len(final_visible_links)} edges.", p=1.0)
-    await asyncio.sleep(0.3)
-    yield _msg("simulation_complete", "All 30+ stakeholder agents have reached a rigorous architectural and operational consensus.")
-
+    session_state["mode"] = "live_llm"
+    async for event in _simulation_event_generator(
+        mode="live_llm",
+        reason=reason or "Configured LLM generated this simulation because the MiroFish engine is unavailable.",
+        dialogues=dialogues,
+     session_state=session_state):
+        yield event
 
 
 @router.get("/stream")
-async def stream_simulation():
+async def stream_simulation(*, session_state: dict[str, Any] = Depends(resolve_run)):
     """SSE stream yielding agent activities and graph updates."""
     current_mode = session_state.get("mode", "mock")
     
+    if current_mode == "live_llm":
+        return stream_events(_live_llm_event_generator(session_state=session_state), run=session_state)
+
+    if current_mode == "live_error":
+        return stream_events(
+            _live_llm_event_generator("The previous live run failed; retrying the configured LLM.", session_state=session_state),
+            run=session_state,
+        )
+
     if current_mode != "live":
-        return StreamingResponse(_simulation_event_generator(mode="mock", reason="Validation mode is set to mock"), media_type="text/event-stream")
+        return stream_events(_simulation_event_generator(mode="mock", reason="Validation mode is set to mock", session_state=session_state), run=session_state)
     
     sim_id = session_state.get("simulation_id")
     if not sim_id:
-        return StreamingResponse(_simulation_event_generator(mode="mock", reason="No active simulation session initialized. Call start simulation first."), media_type="text/event-stream")
+        return stream_events(
+            _live_llm_event_generator("MiroFish simulation session was not created; using the configured Live LLM.", session_state=session_state),
+            run=session_state,
+        )
 
     # Live Mode Connection check and Polling with Graceful Fallback
     import httpx
@@ -951,27 +1204,12 @@ async def stream_simulation():
             resp = await client.get(f"{settings.mirofish_base_url}/health")
             resp.raise_for_status()
     except Exception as ec:
-        logger.warning(f"MiroFish Engine is unreachable ({ec}). Gracefully falling back to 12-agent enterprise Mock stream.")
-        return StreamingResponse(_simulation_event_generator(mode="live_fallback", reason=f"Engine Unreachable: {str(ec)}"), media_type="text/event-stream")
-
-    async def _mirofish_event_generator():
-        import json
-        yield f'data: {json.dumps({"type": "mode_check", "mode": "live"})}\n\n'
-    
-    sim_id = session_state.get("simulation_id")
-    if not sim_id:
-        return StreamingResponse(_simulation_event_generator(mode="mock", reason="No active simulation session initialized. Call start simulation first."), media_type="text/event-stream")
-
-    # Live Mode Connection check and Polling with Graceful Fallback
-    import httpx
-    try:
-        # Check connection to MiroFish API engine first
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.mirofish_base_url}/health")
-            resp.raise_for_status()
-    except Exception as ec:
-        logger.warning(f"MiroFish Engine is unreachable ({ec}). Gracefully falling back to 12-agent enterprise Mock stream.")
-        return StreamingResponse(_simulation_event_generator(mode="live_fallback", reason=f"Engine Unreachable: {str(ec)}"), media_type="text/event-stream")
+        logger.warning("MiroFish Engine is unreachable (%s). Switching to configured Live LLM.", ec)
+        session_state["mode"] = "live_llm"
+        return stream_events(
+            _live_llm_event_generator(f"MiroFish engine unreachable: {ec}. Using the configured Live LLM.", session_state=session_state),
+            run=session_state,
+        )
 
     async def _mirofish_event_generator():
         import json
@@ -989,20 +1227,26 @@ async def stream_simulation():
                 
                 fe_nodes = []
                 fe_links = []
+                node_ids: set[str] = set()
                 
                 label_to_group = {
                     "agent": 0,
                     "stakeholder": 0,
-                    "risk": 1,
-                    "solution": 2,
-                    "alternative": 2,
-                    "requirement": 3,
-                    "fact": 4
+                    "risk": 4,
+                    "solution": 5,
+                    "alternative": 5,
+                    "requirement": 5,
+                    "fact": 6
                 }
                 
                 for nd in raw_graph.get("nodes", []):
                     node_id = nd.get("uuid") or nd.get("name")
-                    node_label = nd.get("name")
+                    if not node_id:
+                        continue
+
+                    node_id = str(node_id)
+                    node_ids.add(node_id)
+                    node_label = str(nd.get("name") or node_id)
                     
                     group = 4
                     nd_labels = nd.get("labels", [])
@@ -1022,7 +1266,10 @@ async def stream_simulation():
                 for ed in raw_graph.get("edges", []):
                     source = ed.get("source_node_uuid")
                     target = ed.get("target_node_uuid")
-                    if source and target:
+                    if source is not None and target is not None:
+                        source = str(source)
+                        target = str(target)
+                    if source in node_ids and target in node_ids:
                         fe_links.append({
                             "source": source,
                             "target": target,
@@ -1050,44 +1297,46 @@ async def stream_simulation():
                     if graph_event:
                         yield graph_event
         except Exception as e:
-            logger.error(f"Error during MiroFish live event polling: {e}. Switching to Mock stream.")
-            # Notify frontend of fallback mid-stream
-            yield f'data: {json.dumps({"type": "mode_check", "mode": "live_fallback", "reason": f"Event Polling Error: {str(e)}"})}\n\n'
-            # Yield remaining mock events for graceful completion
-            async for mock_data in _simulation_event_generator(mode="live_fallback", reason=f"Event Polling Error: {str(e)}"):
-                # Skip the first mode_check or logs if they clash
-                if "mode_check" in mock_data or "Live Engine Fallback" in mock_data:
-                    continue
-                yield mock_data
+            logger.error("Error during MiroFish live event polling: %s. Switching to configured Live LLM.", e)
+            session_state["mode"] = "live_llm"
+            yield f'data: {json.dumps({"type": "mode_check", "mode": "live_llm", "reason": f"MiroFish event polling failed: {e}. Using the configured Live LLM."})}\n\n'
+            async for live_event in _live_llm_event_generator(f"MiroFish event polling failed: {e}. Using the configured Live LLM.", session_state=session_state):
+                yield live_event
 
-    return StreamingResponse(_mirofish_event_generator(), media_type="text/event-stream")
+    return stream_events(_mirofish_event_generator(), run=session_state)
 
 
 @router.get("/{sim_id}/result")
-async def get_simulation_result(sim_id: str):
+async def get_simulation_result(sim_id: str, session_state: dict = Depends(resolve_run)):
     """Fetch completed simulation dialogue logs."""
-    return {"sim_id": sim_id, "logs": [], "summary": "Simulation result placeholder"}
+    return {"sim_id": session_state["run_id"], "status": session_state["status"], "logs": session_state.get("simulation_events", []), "report_markdown": session_state.get("report_markdown")}
 
 @router.post("/{sim_id}/report")
-async def generate_report(sim_id: str):
+async def generate_report(sim_id: str, retry: bool = False, *, session_state: dict[str, Any] = Depends(resolve_run)):
     """Trigger the ReportAgent to generate a Markdown report."""
-    if settings.mirofish_mode != "live":
+    if session_state.get("report_status") == "streaming":
+        raise HTTPException(409, "Report stream already running")
+    if retry:
+        for key in ("report_task_id", "report_id", "report_status", "report_events", "report_markdown"):
+            session_state.pop(key, None)
+    if session_state.get("mode") == "live_llm":
+        return {"status": "generating", "task_id": "live_llm_report"}
+
+    if session_state.get("mode") != "live":
         session_state["report_task_id"] = "mock_task_123"
         return {"status": "generating", "task_id": "mock_task_123"}
         
     try:
-        resp = await mirofish.generate_report(sim_id)
+        resp = await mirofish.generate_report(session_state["simulation_id"], force_regenerate=retry)
+        session_state["report_id"] = resp.get("data", {}).get("report_id")
         task_id = resp.get("data", {}).get("task_id", "")
         session_state["report_task_id"] = task_id
         return {"status": "generating", "task_id": task_id}
     except Exception as e:
-        logger.error(f"Failed to trigger report: {e}")
-        if settings.mirofish_fallback_to_mock:
-            session_state["report_task_id"] = "mock_task_fallback"
-            return {"status": "generating", "task_id": "mock_task_fallback"}
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Failed to trigger live MiroFish report: %s", e)
+        raise HTTPException(status_code=502, detail=str(e))
 
-async def _report_event_generator():
+async def _report_event_generator(*, session_state: dict[str, Any]):
     """Mock SSE stream for report generation with highly premium quality insights."""
     import json
     def _msg(data):
@@ -1111,44 +1360,72 @@ async def _report_event_generator():
     yield _msg({"type": "section_complete", "section_id": 3})
     await asyncio.sleep(1.0)
 
-    markdown = """# 📊 MiroFish 시뮬레이션 검증 보고서
+    markdown = _build_mock_report(session_state=session_state)
+    yield _msg({"type": "report_complete", "markdown": markdown})
 
-## 1. 핵심 리스크 및 잠재적 취약점 (Top Risks)
-- 🔒 **개인식별정보(PII) 유출 및 레이턴시 병목**: 외부 LLM 호출 시 민감정보 유출 우려 및 동기식 PII 필터 적용으로 인한 E2E 레이턴시 상승 리스크.
-- 💸 **자율 환불 권한 이관에 따른 재무/법적 리스크**: 50만원 이하 자율 환불의 오작동 및 셀러 연합의 정산 먹튀 불안감으로 인한 대규모 이탈 위험.
-- 📉 **HWP 표 파싱 오류 및 RAG 할루시네이션**: 매뉴얼 문서 표 구조 인식 불안정(오인식률 18%)으로 인한 잘못된 환불 규정 해석 위험.
-- 👥 **상담 조직의 직무 불안 및 반발**: 자동화율 40% 도달 시 기존 상담 조직의 구조조정 우려에 따른 반발 및 사보타주 리스크.
 
-## 2. 해결 방안 및 권장 설계 조정 (Proposed Solutions)
-- **PII 난독화 필터 및 Ollama Failover 도입**: 50ms 이내 초고속 PII 마스킹 레이어를 적용하고 외부 LLM 장애 대응을 위한 300ms 로컬 Failover 프록시 구성.
-- **HITL 승인 대기 큐 및 원클릭 셀러 승인 UI**: 신뢰도 85% 미만 혹은 단일 거래 50만원 초과 시 처리를 유예하고 관리자/셀러용 'HITL 대기 큐' 위젯으로 이관.
-- **RAG 표 파싱 고도화 및 4주 Shadow Mode 검증**: 9월 런칭 전 4주간 백그라운드 섀도우 테스트를 정식 로드맵에 반영하여 실측 데이터 튜닝 및 환각율 3% 미만 통제.
-- **상담 조직의 AI 신뢰성 감사관 업스킬링**: CS 인력을 AI 판정 감사관으로 직무 격상하는 HR 로드맵 연계로 노조 갈등 원천 해소.
+async def _live_llm_report_event_generator(*, session_state: dict[str, Any]) -> AsyncGenerator[str, None]:
+    """Generate the report with the configured LLM from this run's stored dialogue."""
+    def _msg(data: dict[str, Any]) -> str:
+        data["mode"] = "live_llm"
+        return f"data: {json.dumps(data)}\n\n"
 
-## 3. 최종 권장 사항 (Final Recommendations)
-- 본 프로젝트의 성공적 배포를 위해 **4주간의 Shadow Mode 모의 검증 인프라 및 실시간 성능 모니터링 대시보드 구축**과 **HITL 관리자 UI 위젯 개발**을 최우선 스프린트 과제로 추진할 것을 강력히 권고합니다.
-"""
+    yield _msg({"type": "planning", "title": "토론 로그 분석 중"})
+    try:
+        markdown = await _build_live_report(session_state=session_state)
+    except Exception as exc:
+        logger.error("Live LLM report generation failed: %s", exc)
+        yield _msg({
+            "type": "report_error",
+            "markdown": (
+                "# Live 보고서 생성 실패\n\n"
+                "Mock 보고서로 대체하지 않았습니다. API 키, 모델, 사용 한도를 확인한 뒤 다시 시도해주세요.\n\n"
+                f"오류: `{exc}`"
+            ),
+        })
+        return
+
+    yield _msg({"type": "section_start", "section_id": 1, "title": "토론 근거 정리"})
+    yield _msg({"type": "section_complete", "section_id": 1})
     yield _msg({"type": "report_complete", "markdown": markdown})
 
 @router.get("/{sim_id}/report/stream")
-async def stream_report(sim_id: str):
+async def stream_report(sim_id: str, *, session_state: dict[str, Any] = Depends(resolve_run)):
     """SSE stream yielding report generation progress and final markdown."""
-    if settings.mirofish_mode != "live":
-        return StreamingResponse(_report_event_generator(), media_type="text/event-stream")
+    if session_state.get("mode") == "live_llm":
+        return stream_events(_live_llm_report_event_generator(session_state=session_state), run=session_state, report=True)
+
+    if session_state.get("mode") != "live":
+        return stream_events(_report_event_generator(session_state=session_state), run=session_state, report=True)
+
+    sim_id = session_state.get("simulation_id") or session_state["run_id"]
         
     task_id = session_state.get("report_task_id")
     
     # Auto-trigger report if task_id not initialized
-    if not task_id:
+    if not task_id and not session_state.get("report_id"):
         try:
-            resp = await mirofish.generate_report(sim_id)
+            resp = await mirofish.generate_report(session_state["simulation_id"])
+            session_state["report_id"] = resp.get("data", {}).get("report_id")
             task_id = resp.get("data", {}).get("task_id", "")
             session_state["report_task_id"] = task_id
         except Exception as e:
-            logger.error(f"Failed to auto-trigger report generation: {e}")
-            if settings.mirofish_fallback_to_mock:
-                return StreamingResponse(_report_event_generator(), media_type="text/event-stream")
-            raise HTTPException(status_code=500, detail=f"Cannot start report generation: {str(e)}")
+            logger.error("Failed to auto-trigger live MiroFish report generation: %s", e)
+            error_message = str(e)
+
+            async def _live_engine_report_error(message: str = error_message) -> AsyncGenerator[str, None]:
+                payload = {
+                    "type": "report_error",
+                    "mode": "live_error",
+                    "markdown": (
+                        "# Live MiroFish 보고서 생성 실패\n\n"
+                        "Mock 보고서로 대체하지 않았습니다. MiroFish 엔진 연결과 API 설정을 확인한 뒤 다시 시도해주세요.\n\n"
+                        f"오류: `{message}`"
+                    ),
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+
+            return stream_events(_live_engine_report_error(), run=session_state, report=True)
 
     async def _mirofish_report_event_generator():
         import json
@@ -1167,7 +1444,7 @@ async def stream_report(sim_id: str):
 
         while attempts < max_attempts:
             try:
-                status_resp = await mirofish.get_report_status(task_id=task_id, simulation_id=sim_id)
+                status_resp = await mirofish.get_report_status(task_id=task_id) if task_id else {"data": {"status": "completed"}}
                 task_data = status_resp.get("data", {})
                 status = task_data.get("status")
                 progress = task_data.get("progress", last_progress)
@@ -1194,7 +1471,7 @@ async def stream_report(sim_id: str):
                         yield f'data: {json.dumps({"type": "section_start", "section_id": sec_id, "title": stage_title})}\n\n'
                         active_sections[sec_id] = "running"
 
-                if status == "completed" or progress >= 100:
+                if status == "completed":
                     # Complete all remaining active sections
                     for sec in list(active_sections.keys()):
                         if active_sections[sec] == "running":
@@ -1202,9 +1479,14 @@ async def stream_report(sim_id: str):
                             active_sections[sec] = "complete"
                             
                     # Fetch finalized report content
-                    report_resp = await mirofish.get_report_by_simulation(sim_id)
+                    report_id = task_data.get("result", {}).get("report_id") or session_state.get("report_id")
+                    if not report_id:
+                        raise ValueError("Completed task did not identify its report")
+                    report_resp = await mirofish.get_report(report_id)
                     report_data = report_resp.get("data", {})
-                    markdown_content = report_data.get("markdown_content") or "## Simulation Report\n\nNo content generated."
+                    markdown_content = report_data.get("markdown_content")
+                    if not markdown_content:
+                        raise ValueError("Completed report has no content")
                     
                     yield f'data: {json.dumps({"type": "report_complete", "markdown": markdown_content})}\n\n'
                     break
@@ -1212,7 +1494,7 @@ async def stream_report(sim_id: str):
                 elif status == "failed":
                     error_msg = task_data.get("error", "Generation failed")
                     err_md = f"## ⚠️ Report Generation Failed\n\n{error_msg}"
-                    yield f'data: {json.dumps({"type": "report_complete", "markdown": err_md})}\n\n'
+                    yield f'data: {json.dumps({"type": "report_error", "markdown": err_md})}\n\n'
                     break
                 else:
                     # Generic progress update (will be captured as standard logs in console/console panel)
@@ -1228,9 +1510,9 @@ async def stream_report(sim_id: str):
             attempts += 1
             
         else:
-            yield f'data: {json.dumps({"type": "report_complete", "markdown": "## ⚠️ Report Generation Timed Out"})}\n\n'
+            yield f'data: {json.dumps({"type": "report_error", "markdown": "## ⚠️ Report Generation Timed Out"})}\n\n'
 
-    return StreamingResponse(_mirofish_report_event_generator(), media_type="text/event-stream")
+    return stream_events(_mirofish_report_event_generator(), run=session_state, report=True)
 
 
 # ---------------------------------------------------------------------------

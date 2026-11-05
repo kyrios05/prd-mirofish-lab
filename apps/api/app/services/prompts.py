@@ -10,7 +10,7 @@ import re
 logger = logging.getLogger(__name__)
 
 _GREETING_ONLY_PATTERN = re.compile(
-    r"^\s*(?:안녕(?:하세요)?|반갑습니다?|hello|hi|hey)\s*[!.?~👋😊]*\s*$",
+    r"^\s*(?:안녕(?:하세요)?|반갑습니다?|hello|hi|hey)[\s!.?~👋😊]*$",
     re.IGNORECASE,
 )
 

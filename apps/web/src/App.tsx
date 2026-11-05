@@ -19,7 +19,7 @@
  * Manual toggle: handle tab click
  */
 
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useChat } from './hooks/useChat';
 import { useValidation } from './hooks/useValidation';
 import { useCheckpoints } from './hooks/useCheckpoints';
@@ -28,7 +28,7 @@ import { PRDPreview } from './components/PRDPreview';
 import { ValidationPanel } from './components/ValidationPanel';
 import { PhaseBadge } from './components/PhaseBadge';
 import { CheckpointModal } from './components/CheckpointModal';
-import { SimulationContainer } from './components/simulation/SimulationContainer';
+const SimulationContainer = lazy(() => import('./components/simulation/SimulationContainer').then(module => ({ default: module.SimulationContainer })));
 import { AppShell, Group, Title, Button, Text, Progress, Select, useMantineColorScheme } from '@mantine/core';
 import appStyles from './styles/app.module.css';
 
@@ -63,7 +63,6 @@ const SECTION_LABELS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 function App() {
-  const chat = useChat();
   const validation = useValidation();
   const checkpoints = useCheckpoints();
   const { setColorScheme } = useMantineColorScheme();
@@ -91,16 +90,12 @@ function App() {
     localStorage.setItem('mirofish_live_mode', String(liveMode));
   }, [liveMode]);
 
-  // ── Slide panel state ────────────────────────────────────────────────────
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  const [validationOpen, setValidationOpen] = useState(true);
+  const chat = useChat({ liveMode });
 
-  // Auto-open when PRD reaches 100%
-  useEffect(() => {
-    if (chat.completeness.progress >= 1.0 && !rightPanelOpen) {
-      setRightPanelOpen(true);
-    }
-  }, [chat.completeness.progress, rightPanelOpen]);
+  // ── Slide panel state ────────────────────────────────────────────────────
+  const [panelOverride, setRightPanelOpen] = useState<boolean | null>(null);
+  const rightPanelOpen = panelOverride ?? chat.completeness.progress >= 1.0;
+  const [validationOpen, setValidationOpen] = useState(true);
 
   // ── Derived values ───────────────────────────────────────────────────────
   const projectId = chat.sessionId ? `proj-${chat.sessionId.slice(0, 8)}` : null;
@@ -132,6 +127,7 @@ function App() {
   // ── Simulation phase full-screen ─────────────────────────────────────────
   if (isSimulationPhase) {
     return (
+      <Suspense fallback={<Text>시뮬레이션 화면을 불러오는 중입니다…</Text>}>
       <SimulationContainer
         chat={chat}
         performAction={chat.performAction}
@@ -140,6 +136,7 @@ function App() {
         theme={theme}
         setTheme={setTheme}
       />
+      </Suspense>
     );
   }
 
@@ -227,7 +224,7 @@ function App() {
               }
             }}
           >
-            {liveMode ? "Live ON (Qwen)" : "Live OFF (Mock)"}
+            {liveMode ? "Live ON" : "Live OFF (Mock)"}
           </Button>
 
           {chat.sessionId && (
@@ -268,7 +265,7 @@ function App() {
           {/* Draggable/Toggle Handle */}
           <div
             className={appStyles.panelHandle}
-            onClick={() => setRightPanelOpen((v) => !v)}
+            onClick={() => setRightPanelOpen(!rightPanelOpen)}
             title={rightPanelOpen ? '우측 패널 닫기' : '우측 패널 열기'}
             role="button"
             aria-label={rightPanelOpen ? '우측 패널 닫기' : '우측 패널 열기'}
@@ -276,7 +273,7 @@ function App() {
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                setRightPanelOpen((v) => !v);
+                setRightPanelOpen(!rightPanelOpen);
               }
             }}
             style={{

@@ -28,11 +28,14 @@ _ISOLATED_ENV_PREFIXES = ("MIROFISH_", "OLLAMA_", "OPENAI_", "ANTHROPIC_", "LLM_
 
 
 @pytest.fixture(autouse=True)
-def _isolate_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_settings_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Make Settings() deterministic: no .env file, no ambient provider vars."""
     from app.config import Settings, settings as live_settings
     from app.services import llm_provider
 
+    monkeypatch.setattr(live_settings, "state_db_path", str(tmp_path / "state.sqlite3"))
+    from app.services.session_store import session_store
+    session_store._store.clear()
     monkeypatch.setitem(Settings.model_config, "env_file", None)
     for key in list(os.environ):
         if key.startswith(_ISOLATED_ENV_PREFIXES) or key == "DEBUG":

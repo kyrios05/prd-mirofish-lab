@@ -113,6 +113,23 @@ MIROFISH_REPORT = {
 }
 
 
+def mock_project_exists(spec: SimulationSpec, base_url: str = "http://mf:5001") -> None:
+    """
+    Stub the Step-0 project lookup in submit_validation() as "already exists".
+
+    submit_validation() calls _ensure_project_exists() first, which would
+    otherwise run the ontology-generation / graph-build setup path. Tests that
+    only care about the create → prepare → run sequence use this to skip it.
+    """
+    project_id = spec.prd_summary.get("project_id") or spec.spec_id
+    respx.get(f"{base_url}/api/graph/project/{project_id}").mock(
+        return_value=httpx.Response(
+            200,
+            json={"success": True, "project_id": project_id, "graph_id": "graph-abc"},
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. TestMiroFishJobModel
 # ---------------------------------------------------------------------------
@@ -317,6 +334,7 @@ class TestAdapterSubmitValidation:
             polling_interval=0.0,
             max_polling_attempts=5,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(200, json=MIROFISH_CREATE_RESP)
         )
@@ -326,7 +344,7 @@ class TestAdapterSubmitValidation:
         respx.post("http://mf:5001/api/simulation/prepare/status").mock(
             return_value=httpx.Response(200, json=MIROFISH_PREPARE_STATUS_READY)
         )
-        respx.post("http://mf:5001/api/simulation/sim-abc123/run").mock(
+        respx.post("http://mf:5001/api/simulation/start").mock(
             return_value=httpx.Response(200, json=MIROFISH_RUN_RESP)
         )
 
@@ -345,6 +363,7 @@ class TestAdapterSubmitValidation:
             max_retries=1,
             polling_interval=0.0,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(500, json={"error": "server error"})
         )
@@ -361,6 +380,7 @@ class TestAdapterSubmitValidation:
             max_retries=1,
             polling_interval=0.0,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(200, json=MIROFISH_CREATE_RESP)
         )
@@ -379,6 +399,7 @@ class TestAdapterSubmitValidation:
             polling_interval=0.0,
             max_polling_attempts=2,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(200, json={"simulation_id": "SIM-999"})
         )
@@ -388,7 +409,7 @@ class TestAdapterSubmitValidation:
         respx.post("http://mf:5001/api/simulation/prepare/status").mock(
             return_value=httpx.Response(200, json=MIROFISH_PREPARE_STATUS_READY)
         )
-        respx.post("http://mf:5001/api/simulation/SIM-999/run").mock(
+        respx.post("http://mf:5001/api/simulation/start").mock(
             return_value=httpx.Response(200, json=MIROFISH_RUN_RESP)
         )
         job = await adapter.submit_validation(sim_spec)
@@ -587,7 +608,7 @@ class TestAdapterGetResult:
         job.simulation_id = "sim-abc"
         job._update(status=MiroFishJobStatus.COMPLETED, progress=1.0)
 
-        respx.get("http://mf:5001/api/simulation/sim-abc/report").mock(
+        respx.get("http://mf:5001/api/report/by-simulation/sim-abc").mock(
             return_value=httpx.Response(200, json=MIROFISH_REPORT)
         )
         result = await adapter.get_result(job, sim_spec)
@@ -614,7 +635,7 @@ class TestAdapterGetResult:
         job = MiroFishJob()
         job.simulation_id = "sim-abc"
         job._update(status=MiroFishJobStatus.COMPLETED)
-        respx.get("http://mf:5001/api/simulation/sim-abc/report").mock(
+        respx.get("http://mf:5001/api/report/by-simulation/sim-abc").mock(
             return_value=httpx.Response(503, json={"error": "unavailable"})
         )
         result = await adapter.get_result(job, sim_spec)
@@ -630,7 +651,7 @@ class TestAdapterGetResult:
         job = MiroFishJob()
         job.simulation_id = "sim-abc"
         job._update(status=MiroFishJobStatus.COMPLETED)
-        respx.get("http://mf:5001/api/simulation/sim-abc/report").mock(
+        respx.get("http://mf:5001/api/report/by-simulation/sim-abc").mock(
             return_value=httpx.Response(200, json=MIROFISH_REPORT)
         )
         await adapter.get_result(job, sim_spec)
@@ -661,6 +682,7 @@ class TestAdapterRetryBehavior:
                 return httpx.Response(500, json={"error": "transient"})
             return httpx.Response(200, json=MIROFISH_CREATE_RESP)
 
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(side_effect=side_effect)
         respx.post("http://mf:5001/api/simulation/prepare").mock(
             return_value=httpx.Response(200, json=MIROFISH_PREPARE_RESP)
@@ -668,7 +690,7 @@ class TestAdapterRetryBehavior:
         respx.post("http://mf:5001/api/simulation/prepare/status").mock(
             return_value=httpx.Response(200, json=MIROFISH_PREPARE_STATUS_READY)
         )
-        respx.post("http://mf:5001/api/simulation/sim-abc123/run").mock(
+        respx.post("http://mf:5001/api/simulation/start").mock(
             return_value=httpx.Response(200, json=MIROFISH_RUN_RESP)
         )
         job = await adapter.submit_validation(sim_spec)
@@ -685,11 +707,13 @@ class TestAdapterRetryBehavior:
             max_retries=2,
             polling_interval=0.0,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(500, json={"error": "permanent"})
         )
         job = await adapter.submit_validation(sim_spec)
         assert job.status == MiroFishJobStatus.FAILED
+        assert "create failed" in (job.error or "")
 
 
 # ---------------------------------------------------------------------------
@@ -705,6 +729,7 @@ class TestAdapterFullLifecycle:
             polling_interval=0.0,
             max_polling_attempts=5,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(200, json=MIROFISH_CREATE_RESP)
         )
@@ -714,13 +739,13 @@ class TestAdapterFullLifecycle:
         respx.post("http://mf:5001/api/simulation/prepare/status").mock(
             return_value=httpx.Response(200, json=MIROFISH_PREPARE_STATUS_READY)
         )
-        respx.post("http://mf:5001/api/simulation/sim-abc123/run").mock(
+        respx.post("http://mf:5001/api/simulation/start").mock(
             return_value=httpx.Response(200, json=MIROFISH_RUN_RESP)
         )
         respx.get("http://mf:5001/api/simulation/sim-abc123").mock(
             return_value=httpx.Response(200, json=MIROFISH_SIM_COMPLETED)
         )
-        respx.get("http://mf:5001/api/simulation/sim-abc123/report").mock(
+        respx.get("http://mf:5001/api/report/by-simulation/sim-abc123").mock(
             return_value=httpx.Response(200, json=MIROFISH_REPORT)
         )
         result = await adapter.run_full_lifecycle(sim_spec)
@@ -735,6 +760,7 @@ class TestAdapterFullLifecycle:
             max_retries=1,
             polling_interval=0.0,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(500, json={"error": "fail"})
         )
@@ -749,6 +775,7 @@ class TestAdapterFullLifecycle:
             polling_interval=0.0,
             max_polling_attempts=2,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(200, json=MIROFISH_CREATE_RESP)
         )
@@ -758,7 +785,7 @@ class TestAdapterFullLifecycle:
         respx.post("http://mf:5001/api/simulation/prepare/status").mock(
             return_value=httpx.Response(200, json=MIROFISH_PREPARE_STATUS_READY)
         )
-        respx.post("http://mf:5001/api/simulation/sim-abc123/run").mock(
+        respx.post("http://mf:5001/api/simulation/start").mock(
             return_value=httpx.Response(200, json=MIROFISH_RUN_RESP)
         )
         # Poll always returns "running" → triggers timeout
@@ -777,6 +804,7 @@ class TestAdapterFullLifecycle:
             polling_interval=0.0,
             max_polling_attempts=5,
         )
+        mock_project_exists(sim_spec)
         respx.post("http://mf:5001/api/simulation/create").mock(
             return_value=httpx.Response(200, json=MIROFISH_CREATE_RESP)
         )
@@ -786,14 +814,14 @@ class TestAdapterFullLifecycle:
         respx.post("http://mf:5001/api/simulation/prepare/status").mock(
             return_value=httpx.Response(200, json=MIROFISH_PREPARE_STATUS_READY)
         )
-        respx.post("http://mf:5001/api/simulation/sim-abc123/run").mock(
+        respx.post("http://mf:5001/api/simulation/start").mock(
             return_value=httpx.Response(200, json=MIROFISH_RUN_RESP)
         )
         respx.get("http://mf:5001/api/simulation/sim-abc123").mock(
             return_value=httpx.Response(200, json=MIROFISH_SIM_COMPLETED)
         )
         # Report endpoint returns garbage
-        respx.get("http://mf:5001/api/simulation/sim-abc123/report").mock(
+        respx.get("http://mf:5001/api/report/by-simulation/sim-abc123").mock(
             return_value=httpx.Response(500, json={"error": "report unavailable"})
         )
         result = await adapter.run_full_lifecycle(sim_spec)
