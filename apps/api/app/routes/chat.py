@@ -110,6 +110,7 @@ class CompletenessInfo(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    simulation_run_id: str | None = None
     """Response from the chat message endpoint."""
 
     session_id: str = Field(..., description="Echo of the session_id from the request.")
@@ -345,6 +346,7 @@ async def send_message(body: ChatRequest) -> ChatResponse:
             phase_transitioned = True
             # Skip updating PRD on explicit phase command
             return ChatResponse(
+        simulation_run_id=state.context.get("simulation_run_id"),
                 session_id=body.session_id,
                 assistant_message=PHASE_READY_MSG,
                 structured_prd=state.current_prd_draft,
@@ -403,6 +405,7 @@ async def send_message(body: ChatRequest) -> ChatResponse:
         effective_draft_status = "ready_for_validation"
 
     return ChatResponse(
+        simulation_run_id=state.context.get("simulation_run_id"),
         session_id=body.session_id,
         assistant_message=final_message,
         structured_prd=updated_draft,
@@ -513,6 +516,9 @@ async def perform_action(body: ActionRequest) -> ChatResponse:
         raise HTTPException(status_code=404, detail="Session not found")
         
     action_id = body.action_id
+    requested_run = (body.payload or {}).get("run_id")
+    if requested_run and requested_run != state.context.get("simulation_run_id"):
+        raise HTTPException(409, "This action belongs to an earlier simulation run")
     
     if action_id == "run_simulation":
         state.current_phase = ConversationPhase.SIMULATION_SETUP.value
@@ -729,6 +735,7 @@ async def perform_action(body: ActionRequest) -> ChatResponse:
         prd_md = None
     
     return ChatResponse(
+        simulation_run_id=state.context.get("simulation_run_id"),
         session_id=body.session_id,
         assistant_message=assistant_message,
         structured_prd=updated_draft,

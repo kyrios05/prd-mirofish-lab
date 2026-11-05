@@ -56,7 +56,7 @@ async def resolve_run(request: Request):
                 values.update({key: previous.get(key) for key in ("project_id", "graph_id")})
         run = create_run(session, **values)
     else:
-        run = find_run(session, request.path_params.get("sim_id", "current"))
+        run = find_run(session, request.query_params.get("run_id") or request.path_params.get("sim_id", "current"))
     try:
         yield run
     finally:

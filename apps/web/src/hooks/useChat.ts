@@ -110,7 +110,7 @@ export function useChat(options?: { liveMode?: boolean }): UseChatReturn {
             setPhase(saved.current_phase);
             setCompleteness(saved.completeness);
             setAvailableActions(saved.available_actions);
-            setLatestResponse({ session_id: saved.session_id, assistant_message: '', structured_prd: saved.structured_prd, prd_markdown: saved.prd_markdown, draft_status: saved.draft_status, completeness: saved.completeness, current_phase: saved.current_phase, available_actions: saved.available_actions, next_questions: [] });
+            setLatestResponse({ simulation_run_id: saved.simulation_run_id, session_id: saved.session_id, assistant_message: '', structured_prd: saved.structured_prd, prd_markdown: saved.prd_markdown, draft_status: saved.draft_status, completeness: saved.completeness, current_phase: saved.current_phase, available_actions: saved.available_actions, next_questions: [] });
             return;
           } catch (cause) {
             if (!(cause instanceof Error) || !('status' in cause) || cause.status !== 404) throw cause;

@@ -25,6 +25,7 @@ export interface ChatRequest {
 }
 
 export interface ChatResponse {
+  simulation_run_id?: string | null;
   /** Echo of the session_id from the request. */
   session_id: string;
   /** Assistant's reply text. */

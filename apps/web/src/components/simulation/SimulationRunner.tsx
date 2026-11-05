@@ -4,6 +4,7 @@ import { Box, Paper, Text, Group, Button, Badge, Progress, ScrollArea, Slider, S
 
 interface Props {
   sessionId: string;
+  runId: string | null;
   performAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
 }
 
@@ -413,7 +414,7 @@ const METADATA_DICTIONARY: Record<string, { role: string; persona: string; goal:
   }
 };
 
-export function SimulationRunner({ performAction, sessionId }: Props) {
+export function SimulationRunner({ performAction, sessionId, runId }: Props) {
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [logs, setLogs] = useState<EventLog[]>([]);
   const [progress, setProgress] = useState(0);
@@ -524,7 +525,7 @@ export function SimulationRunner({ performAction, sessionId }: Props) {
   }, [logs]);
 
   useEffect(() => {
-    const eventSource = new EventSource(`/api/simulation/stream?session_id=${encodeURIComponent(sessionId)}`);
+    const eventSource = new EventSource(`/api/simulation/stream?session_id=${encodeURIComponent(sessionId)}&run_id=${encodeURIComponent(runId ?? "current")}`);
     // 언마운트 시 남은 카메라 정렬 타이머를 정리하기 위해 추적한다.
     const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -1106,7 +1107,7 @@ export function SimulationRunner({ performAction, sessionId }: Props) {
               <Button 
                 variant="gradient"
                 gradient={{ from: 'indigo', to: 'cyan' }}
-                onClick={() => void performAction('simulation_complete')}
+                onClick={() => void performAction('simulation_complete', {run_id: runId})}
                 style={{ pointerEvents: 'auto', whiteSpace: 'nowrap' }}
               >
                 View Simulation Report →

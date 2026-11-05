@@ -145,3 +145,15 @@ def test_direct_mock_start_does_not_require_a_previous_run():
     response = TestClient(app).post('/simulation/start', json={'session_id':owner.session_id,'live':False})
     assert response.status_code == 200
     assert response.json()['simulation_id'] == find_run(owner)['run_id']
+
+
+def test_old_stream_and_action_cannot_switch_to_new_run():
+    owner = session_store.create_session()
+    a = create_run(owner, status='completed', mode='mock', simulation_events=[{'type':'agent_post','content':'old-run'}])
+    b = create_run(owner, status='completed', mode='mock', simulation_events=[{'type':'agent_post','content':'new-run'}])
+    client = TestClient(app)
+    response = client.get('/simulation/stream',params={'session_id':owner.session_id,'run_id':a['run_id']})
+    assert 'old-run' in response.text and 'new-run' not in response.text
+    action = client.post('/chat/action',json={'session_id':owner.session_id,'action_id':'simulation_complete','payload':{'run_id':a['run_id']}})
+    assert action.status_code == 409
+    assert find_run(owner)['run_id'] == b['run_id']

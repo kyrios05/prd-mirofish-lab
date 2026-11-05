@@ -4,11 +4,12 @@ import { Box, Paper, Title, Text, Button, Group, Loader, List, ThemeIcon } from 
 
 interface Props {
   sessionId: string;
+  runId: string | null;
   performAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
   phase: string;
 }
 
-export function ReportView({ performAction, phase, sessionId }: Props) {
+export function ReportView({ performAction, phase, sessionId, runId }: Props) {
   const [reportLog, setReportLog] = useState<string[]>([]);
   const [markdownResult, setMarkdownResult] = useState<string | null>(null);
   
@@ -18,7 +19,7 @@ export function ReportView({ performAction, phase, sessionId }: Props) {
     if (phase === 'report_generating' || phase === 'report_complete') {
       // 상대 경로(/api)를 사용해야 dev 프록시와 nginx 배포 환경 모두에서 동작한다.
       // (하드코딩된 localhost:8000은 배포 빌드에서 영구 로딩 상태를 유발했다.)
-      const eventSource = new EventSource(`/api/simulation/current/report/stream?session_id=${encodeURIComponent(sessionId)}`);
+      const eventSource = new EventSource(`/api/simulation/${encodeURIComponent(runId ?? "current")}/report/stream?session_id=${encodeURIComponent(sessionId)}`);
       let completeTimer: ReturnType<typeof setTimeout> | undefined;
       eventSource.onmessage = (event) => {
         try {
@@ -29,7 +30,7 @@ export function ReportView({ performAction, phase, sessionId }: Props) {
           } else if (data.type === 'report_complete') {
             setMarkdownResult(data.markdown);
             eventSource.close();
-            if (phase === 'report_generating') completeTimer = setTimeout(() => performAction('generate_report_complete'), 1000);
+            if (phase === 'report_generating') completeTimer = setTimeout(() => performAction('generate_report_complete', {run_id: runId}), 1000);
           } else {
             setReportLog(prev => [...prev, data.title || data.type]);
           }
@@ -46,7 +47,7 @@ export function ReportView({ performAction, phase, sessionId }: Props) {
         if (completeTimer) clearTimeout(completeTimer);
       };
     }
-  }, [phase, performAction, sessionId, attempt]);
+  }, [phase, performAction, sessionId, runId, attempt]);
 
   return (
     <Box style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'var(--bg-app)', width: '100%' }}>
@@ -73,7 +74,7 @@ export function ReportView({ performAction, phase, sessionId }: Props) {
               size="md"
               variant="gradient"
               gradient={{ from: 'indigo', to: 'cyan' }}
-              onClick={() => performAction('generate_report')}
+              onClick={() => performAction('generate_report', {run_id: runId})}
             >
               Start Generating Report
             </Button>
@@ -102,7 +103,7 @@ export function ReportView({ performAction, phase, sessionId }: Props) {
               <Text c="red" style={{ whiteSpace: 'pre-wrap' }}>{error}</Text>
               <Button mt="sm" onClick={async () => {
                 try {
-                  const response = await fetch(`/api/simulation/current/report?session_id=${encodeURIComponent(sessionId)}&retry=true`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                  const response = await fetch(`/api/simulation/${encodeURIComponent(runId ?? "current")}/report?session_id=${encodeURIComponent(sessionId)}&retry=true`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
                   if (!response.ok) throw new Error('재시도 요청에 실패했습니다. 잠시 후 다시 시도해주세요.');
                   setError(null); setReportLog([]); setAttempt(value => value + 1);
                 } catch (cause) { setError(cause instanceof Error ? cause.message : '재시도 실패'); }

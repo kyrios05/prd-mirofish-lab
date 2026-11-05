@@ -102,9 +102,9 @@ export function SimulationContainer({ chat, performAction, liveMode, setLiveMode
             prd={chat.latestResponse?.structured_prd ?? null}
           />
         )}
-        {phase === 'simulating' && <SimulationRunner performAction={performAction} sessionId={sessionId} />}
+        {phase === 'simulating' && <SimulationRunner performAction={performAction} sessionId={sessionId} runId={chat.latestResponse?.simulation_run_id ?? null} />}
         {(phase === 'simulation_result' || phase === 'report_generating' || phase === 'report_complete') && (
-          <ReportView performAction={performAction} phase={phase} sessionId={sessionId} />
+          <ReportView performAction={performAction} phase={phase} sessionId={sessionId} runId={chat.latestResponse?.simulation_run_id ?? null} />
         )}
       </Box>
     </Box>
