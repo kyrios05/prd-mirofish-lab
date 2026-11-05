@@ -1,74 +1,59 @@
 import { useState } from 'react';
-import { Container, Grid, Card, TextInput, Textarea, Button, Text, Group, Box, Center, ActionIcon, Title, Paper, Badge, Stack, Progress } from '@mantine/core';
+import { Container, Grid, Card, TextInput, Textarea, Button, Text, Group, Box, Center, ActionIcon, Title, Paper, Badge, Stack, Progress, NativeSelect } from '@mantine/core';
 
 interface Stakeholder {
   name: string;
   role: string;
   review_angle: string;
   likely_objections: string[];
+  source_uuid?: string | null;
 }
 
 interface Props {
+  sessionId: string;
   performAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
   liveMode?: boolean;
   prd?: Record<string, unknown> | null;
 }
 
-export function SimulationSetup({ performAction, liveMode, prd }: Props) {
+export function SimulationSetup({ performAction, liveMode, prd, sessionId }: Props) {
+  const [seedSource, setSeedSource] = useState('llm');
+  const [selectionId, setSelectionId] = useState<string | null>(null);
+  const [datasetSource, setDatasetSource] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [step, setStep] = useState<'initial' | 'config'>('initial');
 
   const [analyzeProgress, setAnalyzeProgress] = useState<number | null>(null);
-  const [analyzeMsg, setAnalyzeMsg] = useState('');
+  const analyzeMsg = '';
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   const [startProgress, setStartProgress] = useState<number | null>(null);
   const [startMsg, setStartMsg] = useState('');
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     setAnalyzing(true);
     setAnalyzeError(null);
-    setAnalyzeProgress(0);
-    setAnalyzeMsg('🔍 PRD 요구사항 도메인 추출 분석 중...');
-    
-    let current = 0;
-    const interval = setInterval(async () => {
-      current += 100 / 30; // 3초에 100% 도달
-      if (current >= 100) {
-        clearInterval(interval);
-        setAnalyzeProgress(null);
-        setAnalyzeMsg('');
-        
-        try {
-          const response = await fetch('/api/simulation/propose-stakeholders', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ live: liveMode, prd }),
-          });
-          const data = await response.json();
-          if (data.status === 'success') {
-            setStakeholders(data.stakeholders);
-            setStep('config');
-          } else {
-            setAnalyzeError(data.message || 'Reality Seeds 생성에 실패했습니다. Live 설정과 API 연결을 확인해주세요.');
-          }
-        } catch (error) {
-          console.error('Failed to propose stakeholders:', error);
-          setAnalyzeError('Reality Seeds 요청에 실패했습니다. API 연결을 확인해주세요.');
-        } finally {
-          setAnalyzing(false);
-        }
-      } else {
-        setAnalyzeProgress(Math.min(current, 99));
-        if (current > 70) {
-          setAnalyzeMsg('📑 30인 전문가 풀 매칭 및 페르소나 데이터 매핑 중...');
-        } else if (current > 35) {
-          setAnalyzeMsg('🤝 이해관계자 리스크 모델 및 피치덱 가이드라인 계산 중...');
-        }
-      }
-    }, 100);
+    setAnalyzeProgress(null);
+    setSelectionId(null);
+    setDatasetSource(null);
+    try {
+      const nemotron = seedSource === 'nemotron';
+      if (nemotron && !liveMode) throw new Error('Nemotron 시드 생성은 Live ON에서 사용할 수 있습니다.');
+      const response = await fetch(nemotron ? '/api/simulation/reality-seeds/nemotron' : '/api/simulation/propose-stakeholders', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(nemotron ? {session_id: sessionId, prd} : {live: liveMode, prd}),
+      });
+      const data = await response.json();
+      if (!response.ok || data.status !== 'success') throw new Error(data.detail || data.message || 'Seed 생성에 실패했습니다.');
+      setStakeholders(data.stakeholders.map((member: Stakeholder, index: number) => ({...member, source_uuid: data.members?.[index]?.source_uuid})));
+      setSelectionId(data.selection_id ?? null);
+      setDatasetSource(data.provenance?.dataset_url ?? null);
+      setStep('config');
+    } catch (error) {
+      setAnalyzeError(error instanceof Error ? error.message : 'Seed 생성에 실패했습니다.');
+    } finally { setAnalyzing(false); }
   };
 
   const handleStart = () => {
@@ -84,14 +69,18 @@ export function SimulationSetup({ performAction, liveMode, prd }: Props) {
         setStartProgress(null);
         setStartMsg('');
         
-        await performAction("start_simulation", { stakeholder_personas: stakeholders, live: liveMode });
+        await performAction("start_simulation", {
+          stakeholder_personas: stakeholders.map(member => ({name: member.name, role: member.role, review_angle: member.review_angle, likely_objections: member.likely_objections})),
+          live: liveMode, seed_selection_id: selectionId,
+          stakeholder_seed_refs: stakeholders.map(member => member.source_uuid ?? null),
+        });
         setLoading(false);
       } else {
         setStartProgress(Math.min(current, 99));
         if (current > 70) {
-          setStartMsg('⚖️ 30인 다자간 이해관계 합의 에이전트 초기 상태 검증 중...');
+          setStartMsg('선택한 참여자 설정 확인 중...');
         } else if (current > 40) {
-          setStartMsg('📡 에이전트 브로드캐스트 라우터 및 RAG 인덱서 초기화 중...');
+          setStartMsg('시뮬레이션 실행 요청 준비 중...');
         }
       }
     }, 100);
@@ -142,13 +131,16 @@ export function SimulationSetup({ performAction, liveMode, prd }: Props) {
             To stress-test your PRD, we first need to identify the key stakeholders who will participate in the simulation. These agents will use their unique personas to challenge your requirements.
           </Text>
 
-          <Button 
+          <NativeSelect label="Seed 생성 방식" value={seedSource} onChange={event => setSeedSource(event.currentTarget.value)} mb="md"
+            data={[{value: 'llm', label: 'PRD 기반 이해관계자'}, {value: 'nemotron', label: 'Nemotron 한국 사용자 8명 + 전문 검토자 4명'}]} disabled={analyzing} />
+          {seedSource === 'nemotron' && <Text size="xs" c="dimmed" mb="md">Live ON 필요 · NVIDIA 합성 페르소나 후보에서 PRD에 맞게 선정합니다. 실제 고객 조사 결과를 뜻하지 않습니다.</Text>}
+          <Button
             size="lg"
             variant="gradient"
             gradient={{ from: 'indigo', to: 'cyan' }}
             onClick={handleAnalyze}
             loading={analyzing && analyzeProgress === null}
-            disabled={analyzeProgress !== null}
+            disabled={analyzing || (seedSource === 'nemotron' && !liveMode)}
             fullWidth
           >
             {analyzing ? 'Analyzing PRD...' : 'Identify Stakeholders'}
@@ -177,6 +169,7 @@ export function SimulationSetup({ performAction, liveMode, prd }: Props) {
             <Text size="sm" c="dimmed" mt={4}>
               Review and refine the stakeholders who will stress-test your product.
             </Text>
+            {datasetSource && <Text size="xs" c="teal" mt="sm">출처: <a href={datasetSource} target="_blank" rel="noreferrer">NVIDIA Nemotron-Personas-Korea</a> · CC BY 4.0 · 원본 UUID와 추가 생성 관점은 실행에 별도 저장됩니다. 편집 사항은 원본과 구분됩니다.</Text>}
           </Box>
           <Stack gap="xs" align="flex-end">
             <Group gap="sm">
@@ -234,7 +227,8 @@ export function SimulationSetup({ performAction, liveMode, prd }: Props) {
                     {s.role ? s.role.slice(0, 2).toUpperCase() : 'ST'}
                   </Center>
                   <Box style={{ flex: 1 }}>
-                    <TextInput 
+                    {s.source_uuid !== undefined && <Badge size="xs" mb="xs" color={s.source_uuid ? 'teal' : 'indigo'}>{s.source_uuid ? `Nemotron · ${s.source_uuid.slice(0, 8)}` : '추가 생성 전문 검토자'}</Badge>}
+                    <TextInput
                       value={s.name} 
                       onChange={(e) => updateStakeholder(idx, 'name', e.target.value)}
                       variant="unstyled"

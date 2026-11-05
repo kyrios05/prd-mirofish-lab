@@ -97,6 +97,7 @@ export function SimulationContainer({ chat, performAction, liveMode, setLiveMode
       <Box style={{ flex: 1, display: 'flex', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
         {phase === 'simulation_setup' && (
           <SimulationSetup
+            sessionId={sessionId}
             performAction={performAction}
             liveMode={liveMode}
             prd={chat.latestResponse?.structured_prd ?? null}
