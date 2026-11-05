@@ -86,6 +86,13 @@ class ChatRequest(BaseModel):
         None,
         description="Optional extra context dict (e.g., hints from the client).",
     )
+    live: bool | None = Field(
+        None,
+        description=(
+            "When False, force the deterministic mock PRD builder. "
+            "When True/None, use the configured LLM (if ollama_enabled)."
+        ),
+    )
 
 class ActionRequest(BaseModel):
     """Trigger a state machine action manually."""
@@ -144,6 +151,11 @@ class CreateSessionResponse(BaseModel):
 
 
 class SessionStatusResponse(BaseModel):
+    current_phase: str = "greeting"
+    structured_prd: dict[str, Any] | None = None
+    prd_markdown: str | None = None
+    simulation_run_id: str | None = None
+    available_actions: list[str] = Field(default_factory=list)
     """Response from GET /chat/sessions/{session_id}."""
 
     session_id: str
@@ -262,6 +274,11 @@ async def get_session_status(session_id: str) -> SessionStatusResponse:
     completeness = calculate_completeness(state.current_prd_draft)
 
     return SessionStatusResponse(
+        current_phase=state.current_phase,
+        available_actions=get_available_actions(ConversationPhase(state.current_phase)),
+        structured_prd=state.current_prd_draft,
+        prd_markdown=render_prd_markdown(state.current_prd_draft) if state.current_prd_draft else None,
+        simulation_run_id=state.context.get("simulation_run_id"),
         session_id=state.session_id,
         created_at=state.created_at,
         turn_count=state.turn_count,
@@ -340,9 +357,12 @@ async def send_message(body: ChatRequest) -> ChatResponse:
             )
 
     # 3. Update PRD draft via service
+    # live=False → intentional mock; live=True/None → LLM when ollama_enabled
+    use_llm = None if body.live is None else bool(body.live)
     updated_draft, assistant_message = await _prd_service.update_from_message(
         session_id=body.session_id,
         message=body.message,
+        use_llm=use_llm,
     )
 
     # 4. Calculate completeness
@@ -406,7 +426,10 @@ async def stream_message(body: ChatRequest, request: Request):
 
     async def event_generator():
         try:
-            generator = _prd_service.stream_update_from_message(body.session_id, body.message)
+            use_llm = None if body.live is None else bool(body.live)
+            generator = _prd_service.stream_update_from_message(
+                body.session_id, body.message, use_llm=use_llm
+            )
             
             # Use a task for the generator to avoid cancelling it on timeout
             gen_task = asyncio.create_task(generator.__anext__())
@@ -506,18 +529,29 @@ async def perform_action(body: ActionRequest) -> ChatResponse:
             is_live = (settings.mirofish_mode == "live")
             
         # Update simulation.py session state mode
-        from app.routes.simulation import session_state as sim_session_state
+        from app.services.simulation_store import create_run, save_run
+        sim_session_state = create_run(state)
         sim_session_state["mode"] = "live" if is_live else "mock"
+        sim_session_state["prd_snapshot"] = state.current_prd_draft or {}
+        sim_session_state["simulation_events"] = []
+        sim_session_state["derived_risks"] = []
+
+        # Always persist personas into the shared simulation session so the
+        # mock/live SSE stream can build the graph from the Reality Seeds panel
+        # (previously only /simulation/start stored this, so chat-driven starts
+        # left stakeholder_personas empty).
+        if body.payload and "stakeholder_personas" in body.payload:
+            personas = body.payload["stakeholder_personas"] or []
+            sim_session_state["stakeholder_personas"] = personas
+            if state.current_prd_draft is not None:
+                logger.info("Updating PRD with custom stakeholder personas from payload")
+                if "validation" not in state.current_prd_draft:
+                    state.current_prd_draft["validation"] = {}
+                state.current_prd_draft["validation"]["stakeholder_personas"] = personas
         
         # T10: Bridge to MiroFish Engine (Only if is_live is True)
         if is_live and state.current_prd_draft:
             try:
-                # Update stakeholder personas if provided in the payload
-                if body.payload and "stakeholder_personas" in body.payload:
-                    logger.info("Updating PRD with custom stakeholder personas from payload")
-                    if "validation" not in state.current_prd_draft:
-                        state.current_prd_draft["validation"] = {}
-                    state.current_prd_draft["validation"]["stakeholder_personas"] = body.payload["stakeholder_personas"]
 
                 # 1. Convert dict to PRDDocument
                 prd_doc = PRDDocument(**state.current_prd_draft)
@@ -544,8 +578,12 @@ async def perform_action(body: ActionRequest) -> ChatResponse:
                 
             except Exception as e:
                 logger.error("Failed to auto-setup MiroFish", exc_info=True)
-                assistant_message = f"Warning: Engine setup failed ({str(e)}). Falling back to mock."
-                sim_session_state["mode"] = "mock"
+                assistant_message = (
+                    f"MiroFish 엔진 설정에 실패했습니다 ({str(e)}). "
+                    "Mock으로 대체하지 않고, 구성된 Live LLM으로 시뮬레이션을 진행합니다."
+                )
+                sim_session_state["mode"] = "live_llm"
+        save_run(sim_session_state)
     elif action_id in ("stop_simulation", "simulation_complete"):
         state.current_phase = ConversationPhase.SIMULATION_RESULT.value
         assistant_message = "Simulation complete."
@@ -553,6 +591,9 @@ async def perform_action(body: ActionRequest) -> ChatResponse:
         state.current_phase = ConversationPhase.REPORT_GENERATING.value
         assistant_message = "Generating report..."
     elif action_id == "generate_report_complete":
+        from app.services.simulation_store import find_run
+        if find_run(state).get("report_status") != "completed":
+            raise HTTPException(409, "Report has not completed successfully")
         state.current_phase = ConversationPhase.REPORT_COMPLETE.value
         assistant_message = "Report generation complete."
     elif action_id == "rewrite_prd":
@@ -633,8 +674,11 @@ async def perform_action(body: ActionRequest) -> ChatResponse:
                     prd["risks"].append(nr)
 
             # Delivery 보완
+            # NOTE: Delivery is extra="forbid" and PRD_SCHEMA.json declares no
+            # shadow_testing_period, so writing one here made the draft fail
+            # every later PRDDocument()/validate_prd() call. Schema wins
+            # (AGENTS.md #1) — add it to PRD_SCHEMA.json first if it's needed.
             prd["delivery"]["timeline_confidence"] = "high"
-            prd["delivery"]["shadow_testing_period"] = "✨ [AI 자동 보완] 4 weeks"
 
             # Validation 보완
             prd["validation"]["simulation_requirement"] = "✨ [AI 자동 보완] Simply AI Agent의 12개 전문가 도메인 입체 검증 및 상품 생태계 전체 밸류 체인 리스크 추출 완료 (시뮬레이션 피드백 반영)"

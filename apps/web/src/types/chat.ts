@@ -20,6 +20,8 @@ export interface ChatRequest {
   message: string;
   /** Optional extra context dict. */
   context?: Record<string, unknown>;
+  /** When false, force mock PRD builder; when true, use configured LLM. */
+  live?: boolean;
 }
 
 export interface ChatResponse {
@@ -61,6 +63,11 @@ export interface CreateSessionResponse {
 // ---------------------------------------------------------------------------
 
 export interface SessionStatusResponse {
+  current_phase: ConversationPhase;
+  structured_prd: Record<string, unknown> | null;
+  prd_markdown: string | null;
+  simulation_run_id: string | null;
+  available_actions: string[];
   session_id: string;
   created_at: string;
   turn_count: number;

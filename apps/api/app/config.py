@@ -9,6 +9,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    state_db_path: str = "data/state.sqlite3"
+
     """Application settings loaded from environment variables."""
 
     app_name: str = Field(default="PRD MiroFish Lab API", description="Application name")

@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createSession, performAction as apiPerformAction, quickStartSimulation } from '../api/chatApi';
+import { createSession, getSessionStatus, performAction as apiPerformAction, quickStartSimulation } from '../api/chatApi';
 import type { ChatResponse, CreateSessionResponse } from '../types/chat';
 import type { CompletenessInfo, ConversationPhase } from '../types/prd';
 
@@ -53,7 +53,7 @@ export interface UseChatReturn {
   /** The pending input value (lifted so ChatPanel can consume) */
   pendingInput: string;
   /** Perform a specific phase transition action */
-  performAction: (actionId: string, payload?: any) => Promise<void>;
+  performAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
   /** Cancel the current in-flight message request */
   cancelMessage: () => void;
   /** Run fast-track demo jump directly to validation/simulation */
@@ -68,7 +68,8 @@ export interface UseChatReturn {
 // Hook implementation
 // ---------------------------------------------------------------------------
 
-export function useChat(): UseChatReturn {
+export function useChat(options?: { liveMode?: boolean }): UseChatReturn {
+  const liveMode = options?.liveMode ?? false;
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [latestResponse, setLatestResponse] = useState<ChatResponse | null>(null);
@@ -100,7 +101,24 @@ export function useChat(): UseChatReturn {
 
     async function init() {
       try {
+        const savedId = sessionStorage.getItem('mirofish_session_id');
+        if (savedId) {
+          try {
+            const saved = await getSessionStatus(savedId);
+            setSessionId(saved.session_id);
+            setMessages(saved.conversation_history.map((turn, index) => ({ ...turn, id: `restored-${index}` })));
+            setPhase(saved.current_phase);
+            setCompleteness(saved.completeness);
+            setAvailableActions(saved.available_actions);
+            setLatestResponse({ session_id: saved.session_id, assistant_message: '', structured_prd: saved.structured_prd, prd_markdown: saved.prd_markdown, draft_status: saved.draft_status, completeness: saved.completeness, current_phase: saved.current_phase, available_actions: saved.available_actions, next_questions: [] });
+            return;
+          } catch (cause) {
+            if (!(cause instanceof Error) || !('status' in cause) || cause.status !== 404) throw cause;
+            sessionStorage.removeItem('mirofish_session_id');
+          }
+        }
         const res: CreateSessionResponse = await createSession();
+        sessionStorage.setItem('mirofish_session_id', res.session_id);
         setSessionId(res.session_id);
 
         // Add welcome message to chat
@@ -162,6 +180,7 @@ export function useChat(): UseChatReturn {
           body: JSON.stringify({
             session_id: sessionId,
             message: trimmed,
+            live: liveMode,
           }),
           signal: controller.signal,
         });
@@ -244,13 +263,13 @@ export function useChat(): UseChatReturn {
         abortControllerRef.current = null;
       }
     },
-    [sessionId, isLoading],
+    [sessionId, isLoading, liveMode],
   );
 
   // ── Perform action ───────────────────────────────────────────────────────
 
   const performAction = useCallback(
-    async (actionId: string, payload?: any) => {
+    async (actionId: string, payload?: Record<string, unknown>) => {
       if (!sessionId || isLoading) return;
       setIsLoading(true);
       setError(null);
@@ -259,7 +278,12 @@ export function useChat(): UseChatReturn {
       abortControllerRef.current = controller;
 
       try {
-        const response = await apiPerformAction(sessionId, actionId, payload, controller.signal);
+        const response = await apiPerformAction(
+          sessionId,
+          actionId,
+          { ...(payload || {}), live: payload?.live ?? liveMode },
+          controller.signal,
+        );
         
         // Add assistant reply logic (optional, skip adding if silent action is preferred)
         if (response.assistant_message) {
@@ -286,7 +310,7 @@ export function useChat(): UseChatReturn {
         abortControllerRef.current = null;
       }
     },
-    [sessionId, isLoading],
+    [sessionId, isLoading, liveMode],
   );
 
   const quickStart = useCallback(

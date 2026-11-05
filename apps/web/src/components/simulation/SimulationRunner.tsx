@@ -1,10 +1,10 @@
-import { useEffect, useState, useRef } from 'react';
-import ForceGraph2D from 'react-force-graph-2d';
-import { forceX, forceY, forceCollide, forceCenter, forceManyBody } from 'd3-force';
-import { Box, Paper, Text, Group, Button, Badge, Progress, ScrollArea, Slider, Stack } from '@mantine/core';
+import { Component, type ErrorInfo, type ReactNode, useEffect, useState, useRef } from 'react';
+import type { NodeObject } from 'force-graph';
+import { Box, Paper, Text, Group, Button, Badge, Progress, ScrollArea, Slider, Stack, Tooltip } from '@mantine/core';
 
 interface Props {
-  performAction: (actionId: string, payload?: any) => Promise<void>;
+  sessionId: string;
+  performAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
 }
 
 interface EventLog {
@@ -14,22 +14,267 @@ interface EventLog {
   agent_name?: string;
   agent_type?: string;
   content?: string;
+  reply_to?: string;
+  round?: number;
+  stance?: 'challenge' | 'support' | 'compromise';
+  claim_reference?: string;
 }
 
-interface GraphNode {
+interface GraphNode extends NodeObject {
+  birthTime?: number;
+  role?: string;
+  summary?: string;
+  persona?: string;
+  goal?: string;
   id: string;
   group: number;
   label?: string;
 }
 
 interface GraphLink {
-  source: any;
-  target: any;
+  birthTime?: number;
+  source: string | GraphNode;
+  target: string | GraphNode;
+  weight?: number;
+  label?: string;
 }
 
 interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
+}
+
+interface NodeDetails {
+  name: string;
+  role: string;
+  persona: string;
+  goal: string;
+}
+
+function getEndpointId(endpoint: unknown): string | null {
+  if (typeof endpoint === 'string' || typeof endpoint === 'number') {
+    return String(endpoint);
+  }
+
+  if (endpoint && typeof endpoint === 'object' && 'id' in endpoint) {
+    const id = (endpoint as { id?: unknown }).id;
+    if (typeof id === 'string' || typeof id === 'number') {
+      return String(id);
+    }
+  }
+
+  return null;
+}
+
+class GraphErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Simulation graph render failed', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Box style={{ height: '100%', display: 'grid', placeItems: 'center' }}>
+          <Text c="red.4" size="sm">시뮬레이션 그래프를 표시하지 못했습니다. 새로고침 후 다시 시도해주세요.</Text>
+        </Box>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function SimulationNodeGraph({
+  nodes,
+  links,
+  selectedNodeId,
+  hoveredNodeId,
+  onNodeClick,
+  onNodeHover,
+  nodeDetails,
+  nodeSize,
+}: {
+  nodes: GraphNode[];
+  links: GraphLink[];
+  selectedNodeId: string | null;
+  hoveredNodeId: string | null;
+  onNodeClick: (node: GraphNode) => void;
+  onNodeHover: (node: GraphNode | null) => void;
+  nodeDetails: (node: GraphNode) => NodeDetails;
+  nodeSize: number;
+}) {
+  const groupColors = ['#3b82f6', '#10b981', '#eab308', '#a855f7', '#ef4444', '#f97316', '#64748b'];
+  const width = 1100;
+  const height = 680;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const groups = new Map<number, GraphNode[]>();
+  nodes.forEach((node) => {
+    const groupNodes = groups.get(node.group) || [];
+    groupNodes.push(node);
+    groups.set(node.group, groupNodes);
+  });
+  const groupIds = [...groups.keys()].sort((left, right) => left - right);
+  const positions = new Map<string, { x: number; y: number }>();
+  groupIds.forEach((group, groupIndex) => {
+    const groupNodes = groups.get(group) || [];
+    const baseAngle = (groupIndex / Math.max(groupIds.length, 1)) * Math.PI * 2 - Math.PI / 2;
+    groupNodes.forEach((node, nodeIndex) => {
+      const offset = (nodeIndex - (groupNodes.length - 1) / 2) * 0.18;
+      const radius = 190 + (nodeIndex % 3) * 52;
+      positions.set(node.id, {
+        x: centerX + Math.cos(baseAngle + offset) * radius,
+        y: centerY + Math.sin(baseAngle + offset) * radius,
+      });
+    });
+  });
+  const topicNode = nodes.find((node) => node.id === 'topic');
+  if (topicNode) {
+    positions.set(topicNode.id, { x: centerX, y: centerY });
+  }
+
+  return (
+    <Box
+      style={{
+        position: 'absolute',
+        inset: 0,
+        overflow: 'auto',
+        padding: '110px 24px 150px',
+      }}
+    >
+      {nodes.length === 0 ? (
+        <Text c="dimmed" ta="center" mt="xl">시뮬레이션 노드를 준비하고 있습니다.</Text>
+      ) : (
+        <Box style={{ height, minWidth: width, position: 'relative' }}>
+          <style>{`
+            @keyframes simulation-node-enter {
+              from { opacity: 0; transform: translate(-50%, -50%) scale(0.35); }
+              to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            }
+            @keyframes simulation-edge-draw {
+              from { stroke-dashoffset: 1; opacity: 0; }
+              to { stroke-dashoffset: 0; opacity: 1; }
+            }
+          `}</style>
+          <svg
+            aria-label="Simulation network edges"
+            height={height}
+            style={{ inset: 0, pointerEvents: 'none', position: 'absolute' }}
+            viewBox={`0 0 ${width} ${height}`}
+            width={width}
+          >
+            <defs>
+              <marker id="simulation-edge-arrow" markerHeight="6" markerWidth="6" orient="auto" refX="7" refY="3">
+                <path d="M0,0 L0,6 L6,3 z" fill="rgba(125, 211, 252, 0.72)" />
+              </marker>
+              <marker id="simulation-risk-edge-arrow" markerHeight="6" markerWidth="6" orient="auto" refX="7" refY="3">
+                <path d="M0,0 L0,6 L6,3 z" fill="rgba(248, 113, 113, 0.8)" />
+              </marker>
+            </defs>
+            {links.map((link, index) => {
+              const sourceId = getEndpointId(link.source);
+              const targetId = getEndpointId(link.target);
+              const source = sourceId ? positions.get(sourceId) : undefined;
+              const target = targetId ? positions.get(targetId) : undefined;
+              if (!source || !target) return null;
+              const isRiskEdge = nodes.some((node) => node.id === sourceId && node.group === 4)
+                || nodes.some((node) => node.id === targetId && node.group === 4);
+              const weight = Math.max(1, link.weight || 1);
+              return (
+                <line
+                  key={`${sourceId}-${targetId}-${index}`}
+                  markerEnd={`url(#${isRiskEdge ? 'simulation-risk-edge-arrow' : 'simulation-edge-arrow'})`}
+                  pathLength={1}
+                  stroke={isRiskEdge ? 'rgba(248, 113, 113, 0.62)' : 'rgba(125, 211, 252, 0.42)'}
+                  strokeWidth={Math.min(1.6 + (weight - 1) * 1.35, 8)}
+                  style={{ animation: 'simulation-edge-draw 520ms ease-out forwards', strokeDasharray: 1, strokeDashoffset: 1 }}
+                  x1={source.x}
+                  x2={target.x}
+                  y1={source.y}
+                  y2={target.y}
+                />
+              );
+            })}
+          </svg>
+          {nodes.map((node) => {
+            const color = groupColors[node.group % groupColors.length] || '#94a3b8';
+            const isSelected = selectedNodeId === node.id;
+            const isHovered = hoveredNodeId === node.id;
+            const position = positions.get(node.id);
+            const details = nodeDetails(node);
+            const diameter = node.id === 'topic'
+              ? Math.max(112, Math.min(156, nodeSize * 10))
+              : Math.max(78, Math.min(126, nodeSize * 7));
+            if (!position) return null;
+
+            return (
+              <Tooltip
+                key={node.id}
+                label={
+                  <Stack gap={5} style={{ maxWidth: 280 }}>
+                    <Text fw={800} size="sm" c="cyan.3">{details.name}</Text>
+                    <Text size="xs" c="gray.4">{details.role}</Text>
+                    <Text size="xs">{details.persona}</Text>
+                    <Text size="xs" c="teal.3">검증 목표: {details.goal}</Text>
+                  </Stack>
+                }
+                multiline
+                position="top"
+                withArrow
+              >
+                <button
+                  type="button"
+                  onClick={() => onNodeClick(node)}
+                  onMouseEnter={() => onNodeHover(node)}
+                  onMouseLeave={() => onNodeHover(null)}
+                  aria-label={`${details.name}: ${details.role}`}
+                  style={{
+                    alignItems: 'center',
+                    animation: 'simulation-node-enter 420ms cubic-bezier(0.16, 1, 0.3, 1) both',
+                    appearance: 'none',
+                    background: isSelected || isHovered ? 'rgba(14, 116, 144, 0.48)' : 'rgba(15, 23, 42, 0.92)',
+                    border: `2px solid ${isSelected || isHovered ? '#38bdf8' : color}`,
+                    borderRadius: '50%',
+                    boxShadow: isSelected || isHovered ? `0 0 24px ${color}88` : 'none',
+                    color: '#f8fafc',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    height: diameter,
+                    justifyContent: 'center',
+                    left: position.x,
+                    lineHeight: 1.25,
+                    overflow: 'hidden',
+                    padding: 10,
+                    position: 'absolute',
+                    textAlign: 'center',
+                    top: position.y,
+                    transform: 'translate(-50%, -50%)',
+                    width: diameter,
+                    zIndex: isSelected || isHovered ? 2 : 1,
+                  }}
+                >
+                  <span style={{ display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3 }}>
+                    {details.name}
+                  </span>
+                </button>
+              </Tooltip>
+            );
+          })}
+        </Box>
+      )}
+    </Box>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -168,10 +413,11 @@ const METADATA_DICTIONARY: Record<string, { role: string; persona: string; goal:
   }
 };
 
-export function SimulationRunner({ performAction }: Props) {
+export function SimulationRunner({ performAction, sessionId }: Props) {
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [logs, setLogs] = useState<EventLog[]>([]);
   const [progress, setProgress] = useState(0);
+  const [isSimulationComplete, setIsSimulationComplete] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -180,68 +426,50 @@ export function SimulationRunner({ performAction }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [simulationMode, setSimulationMode] = useState<'mock' | 'live' | 'live_fallback' | null>(null);
-  const fgRef = useRef<any>(null);
+  const [simulationMode, setSimulationMode] = useState<'mock' | 'live' | 'live_llm' | 'live_fallback' | 'live_error' | null>(null);
+
 
   // ── Dynamic Visualization Controls State ───────────────────────────────
   const [nodeSize, setNodeSize] = useState(8);
   const [sliderLinkWidth, setSliderLinkWidth] = useState(1.2);
   const [clusterDistance, setClusterDistance] = useState(0.24);
   const [isSettingPanelOpen, setIsSettingPanelOpen] = useState(true);
-
-  // ── Helper Functions for Dynamic Styling ─────────────────────────────
-  const getDegree = (nodeId: string) => {
-    if (!graphData.links) return 0;
-    return graphData.links.filter((l: any) => {
-      const sId = l.source.id || l.source;
-      const tId = l.target.id || l.target;
-      return sId === nodeId || tId === nodeId;
-    }).length;
-  };
-
-  const getLinkWeight = (link: any) => {
-    if (link.weight !== undefined) return link.weight;
-    if (!graphData.nodes || graphData.nodes.length === 0) return 1.2;
-    
-    const sId = link.source.id || link.source;
-    const tId = link.target.id || link.target;
-    
-    const sNode = graphData.nodes.find(n => n.id === sId);
-    const tNode = graphData.nodes.find(n => n.id === tId);
-    
-    if (!sNode || !tNode) return 1.2;
-    
-    const sGrp = sNode.group;
-    const tGrp = tNode.group;
-    
-    // 리스크(4)와 솔루션(5) 또는 마일스톤(6) 간의 연결
-    if ((sGrp === 4 && tGrp === 5) || (sGrp === 5 && tGrp === 4)) return 3.2;
-    if ((sGrp === 5 && tGrp === 6) || (sGrp === 6 && tGrp === 5)) return 2.6;
-    if ((sGrp === 4 && tGrp === 1) || (sGrp === 1 && tGrp === 4)) return 2.2;
-    if (sGrp === tGrp) return 1.0;
-    
-    return 1.6;
-  };
+  const [showBottomLog, setShowBottomLog] = useState(true);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [simulationReason, setSimulationReason] = useState<string | null>(null);
+  const bottomLogEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (containerRef.current) {
-      setDimensions({
-        width: containerRef.current.clientWidth,
-        height: containerRef.current.clientHeight
-      });
-    }
-
-    const handleResize = () => {
+    const updateDimensions = () => {
       if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight
-        });
+        const { clientHeight: height, clientWidth: width } = containerRef.current;
+        if (width <= 0 || height <= 0) return;
+
+        setDimensions(() => ({
+          width,
+          height,
+        }));
       }
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+
+    updateDimensions();
+    const resizeObserver = new ResizeObserver(updateDimensions);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
   }, []);
+
+  // dimensions는 리사이즈마다 새 객체가 되므로, SSE 구독 effect가 이를
+  // 의존성으로 두면 창 크기를 바꿀 때마다 스트림이 재연결되어 시뮬레이션이
+  // 처음부터 다시 시작된다. ref로 최신 값만 읽어 재구독을 막는다.
+  const dimensionsRef = useRef(dimensions);
+  useEffect(() => {
+    dimensionsRef.current = dimensions;
+  }, [dimensions]);
 
   // Initialize new nodes with clustered starting positions to jump-start clustering
   useEffect(() => {
@@ -250,14 +478,14 @@ export function SimulationRunner({ performAction }: Props) {
       const centerY = dimensions.height / 2;
       const radius = Math.min(dimensions.width, dimensions.height) * clusterDistance;
       
-      graphData.nodes.forEach((node: any) => {
+      graphData.nodes.forEach((node: GraphNode) => {
         if (node.x === undefined || node.y === undefined) {
           const group = node.group || 0;
           const angle = (group / 7) * 2 * Math.PI;
           
-          const crossGroupLinks = graphData.links.filter((l: any) => {
-            const sId = l.source.id || l.source;
-            const tId = l.target.id || l.target;
+          const crossGroupLinks = graphData.links.filter((l: GraphLink) => {
+            const sId = getEndpointId(l.source);
+            const tId = getEndpointId(l.target);
             if (sId !== node.id && tId !== node.id) return false;
             const otherId = sId === node.id ? tId : sId;
             const otherNode = graphData.nodes.find(n => n.id === otherId);
@@ -290,167 +518,26 @@ export function SimulationRunner({ performAction }: Props) {
 
 
 
-  const prevSettingsRef = useRef({ 
-    nodeSize, 
-    clusterDistance, 
-    width: dimensions.width, 
-    height: dimensions.height,
-    nodeCount: 0,
-    linkCount: 0
-  });
-
-  // Configure Force Layout Clustering
-  useEffect(() => {
-    if (fgRef.current) {
-      const fg = fgRef.current;
-      
-      try {
-        const centerX = dimensions.width / 2;
-        const centerY = dimensions.height / 2;
-
-        // 0. NaN 좌표 복구 (Sanity Check) 및 가속도 클리핑 (폭주 방지)
-        const currentNodes = fg.d3ForceLayout?.nodes() || fg.graphData()?.nodes;
-        if (currentNodes) {
-          currentNodes.forEach((node: any) => {
-            const maxVel = 15;
-            if (node.vx !== undefined && Math.abs(node.vx) > maxVel) node.vx = Math.sign(node.vx) * maxVel;
-            if (node.vy !== undefined && Math.abs(node.vy) > maxVel) node.vy = Math.sign(node.vy) * maxVel;
-
-            if (node.x === undefined || node.y === undefined || isNaN(node.x) || isNaN(node.y)) {
-              const group = node.group || 0;
-              const angle = (group / 7) * 2 * Math.PI;
-              const r = Math.min(dimensions.width, dimensions.height) * clusterDistance;
-              node.x = centerX + r * Math.cos(angle) + (Math.random() - 0.5) * 20;
-              node.y = centerY + r * Math.sin(angle) + (Math.random() - 0.5) * 20;
-              node.vx = 0;
-              node.vy = 0;
-            }
-          });
-        }
-        
-        // 1. Center force 복원 (중심 분산 방지 및 중앙 정렬 수호 - 인스턴스 갱신)
-        const fCenter = fg.d3Force('center');
-        if (fCenter) {
-          fCenter.x(centerX).y(centerY).strength(0.06);
-        } else {
-          fg.d3Force('center', forceCenter(centerX, centerY).strength(0.06));
-        }
-
-        // 2. Link force의 강도와 거리 조율 (레퍼런스 보존 및 거리 확장)
-        const fLink = fg.d3Force('link');
-        if (fLink) {
-          fLink.distance(90).strength(0.45); // 링크 기본 거리를 90으로 대폭 확대
-        } else {
-          fg.d3Force('link')?.distance(90)?.strength(0.45);
-        }
-
-        // 3. Repulsion (서로 밀어내는 힘) 조율 (레퍼런스 보존 및 반발력 대폭 확대)
-        const fCharge = fg.d3Force('charge');
-        if (fCharge) {
-          fCharge.strength(-700); // 서로 밀쳐내는 반발력을 -700으로 대폭 키워 겹침 방지
-        } else {
-          fg.d3Force('charge', forceManyBody().strength(-700));
-        }
-
-        // 4. Group 기반 중심 좌표 유도 force (clusterDistance 적용) - 기존 레퍼런스를 보존하여 업데이트
-        const radius = Math.min(dimensions.width, dimensions.height) * clusterDistance;
-        
-        const targetX = (d: any) => {
-          const group = d.group || 0;
-          const angle = (group / 7) * 2 * Math.PI;
-          return centerX + radius * Math.cos(angle);
-        };
-        const targetY = (d: any) => {
-          const group = d.group || 0;
-          const angle = (group / 7) * 2 * Math.PI;
-          return centerY + radius * Math.sin(angle);
-        };
-
-        const fX = fg.d3Force('x');
-        if (fX) {
-          fX.x(targetX).strength(0.22);
-        } else {
-          fg.d3Force('x', forceX().x(targetX).strength(0.22));
-        }
-
-        const fY = fg.d3Force('y');
-        if (fY) {
-          fY.y(targetY).strength(0.22);
-        } else {
-          fg.d3Force('y', forceY().y(targetY).strength(0.22));
-        }
-
-        // 5. Collision 힘 (기존 인스턴스 재활용)
-        const getCollideRadius = (node: any) => {
-          const degree = getDegree(node.id);
-          const degreeScale = 1.0 + Math.min(degree * 0.12, 1.2);
-          return (nodeSize * degreeScale) + 12; // 평상시 라벨 텍스트 숨김에 맞춰 충돌 반경을 nodeSize * degreeScale + 12로 축소
-        };
-
-        const fCollide = fg.d3Force('collide');
-        if (fCollide) {
-          fCollide.radius(getCollideRadius).iterations(3);
-        } else {
-          fg.d3Force('collide', forceCollide()
-            .radius(getCollideRadius)
-            .iterations(3)
-          );
-        }
-
-        // 이전 설정값 및 데이터(노드/링크 수) 변경 비교하여 reheat 실행
-        const nodeCount = graphData.nodes?.length || 0;
-        const linkCount = graphData.links?.length || 0;
-        const prev = prevSettingsRef.current;
-        const isSettingsChanged = prev.nodeSize !== nodeSize || 
-                                  prev.clusterDistance !== clusterDistance || 
-                                  prev.width !== dimensions.width || 
-                                  prev.height !== dimensions.height ||
-                                  prev.nodeCount !== nodeCount ||
-                                  prev.linkCount !== linkCount;
-        if (isSettingsChanged) {
-          fg.d3ReheatSimulation();
-          prevSettingsRef.current = { 
-            nodeSize, 
-            clusterDistance, 
-            width: dimensions.width, 
-            height: dimensions.height,
-            nodeCount,
-            linkCount
-          };
-        }
-      } catch (err) {
-        console.error("Failed to configure D3 force layout clustering:", err);
-      }
-    }
-  }, [fgRef, dimensions, clusterDistance, nodeSize, graphData]);
-
-
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomLogEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
   useEffect(() => {
-    // Generate initial dummy graph
-    const nodes = Array.from({ length: 15 }).map((_, i) => ({ 
-      id: `node_${i}`, 
-      group: Math.floor(Math.random() * 3),
-      birthTime: Date.now() - 10000 // 초기 노드는 이미 애니메이션이 끝난 상태로 둠
-    }));
-    const links = Array.from({ length: 20 }).map(() => ({
-      source: `node_${Math.floor(Math.random() * 15)}`,
-      target: `node_${Math.floor(Math.random() * 15)}`,
-      birthTime: Date.now() - 10000
-    }));
-    setGraphData({ nodes, links } as any);
+    const eventSource = new EventSource(`/api/simulation/stream?session_id=${encodeURIComponent(sessionId)}`);
+    // 언마운트 시 남은 카메라 정렬 타이머를 정리하기 위해 추적한다.
+    const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
 
-    const eventSource = new EventSource('/api/simulation/stream');
-    
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        setStreamError(null);
         
         if (data.mode) {
           setSimulationMode(data.mode);
+        }
+        if (data.reason) {
+          setSimulationReason(data.reason);
         }
 
         if (data.type === 'mode_check') {
@@ -460,6 +547,13 @@ export function SimulationRunner({ performAction }: Props) {
         if (data.type === 'simulation_complete') {
           eventSource.close();
           setProgress(100);
+          setIsSimulationComplete(true);
+          return;
+        }
+
+        if (data.type === 'simulation_error') {
+          eventSource.close();
+          setStreamError(data.content || data.reason || 'Live simulation failed.');
           return;
         }
 
@@ -469,17 +563,14 @@ export function SimulationRunner({ performAction }: Props) {
 
         // 실시간 노드/링크 동기화: 페이로드에 nodes와 links가 존재하면 즉시 그래프 데이터 갱신
         if (data.nodes && Array.isArray(data.nodes) && data.links && Array.isArray(data.links)) {
-          const isInitialLoad = graphData.nodes.length <= 15;
+          const isInitialLoad = graphData.nodes.length === 0;
 
           setGraphData(prev => {
-            // 1. D3 물리 엔진에서 실시간 가동 중인 실제 노드의 최신 물리 좌표 및 birthTime 맵핑
-            const prevCoordsMap = new Map<string, any>();
+            const prevCoordsMap = new Map<string, NodeObject>();
             const prevBirthMap = new Map<string, number>();
-            
-            const activeD3Nodes = fgRef.current?.d3ForceLayout?.nodes();
-            const sourceNodes = (activeD3Nodes && activeD3Nodes.length > 0) ? activeD3Nodes : (prev?.nodes || []);
+            const sourceNodes = prev?.nodes || [];
 
-            sourceNodes.forEach((n: any) => {
+            sourceNodes.forEach((n: GraphNode) => {
               if (n.x !== undefined && n.y !== undefined) {
                 prevCoordsMap.set(n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy, fx: n.fx, fy: n.fy });
               }
@@ -489,7 +580,7 @@ export function SimulationRunner({ performAction }: Props) {
             });
 
             // 2. 새 노드 리스트에 좌표 복제 및 birthTime 설정
-            const updatedNodes = data.nodes.map((node: any) => {
+            const updatedNodes = data.nodes.map((node: GraphNode) => {
               const coords = prevCoordsMap.get(node.id);
               const prevBirth = prevBirthMap.get(node.id);
               const birthTime = prevBirth !== undefined ? prevBirth : Date.now();
@@ -514,9 +605,10 @@ export function SimulationRunner({ performAction }: Props) {
             // 기존 링크들의 birthTime 맵핑
             const prevLinkBirthMap = new Map<string, number>();
             if (prev && prev.links) {
-              prev.links.forEach((l: any) => {
-                const sId = l.source.id || l.source;
-                const tId = l.target.id || l.target;
+              prev.links.forEach((l: GraphLink) => {
+                const sId = getEndpointId(l.source);
+                const tId = getEndpointId(l.target);
+                if (!sId || !tId) return;
                 const lKey = `${sId}-${tId}`;
                 if (l.birthTime !== undefined) {
                   prevLinkBirthMap.set(lKey, l.birthTime);
@@ -525,36 +617,31 @@ export function SimulationRunner({ performAction }: Props) {
             }
 
             // 3. 새 링크 리스트에 실제 노드 객체 레퍼런스 이식 및 birthTime 설정
-            const updatedLinks = data.links.map((link: any) => {
-              const sId = link.source.id || link.source;
-              const tId = link.target.id || link.target;
-              const sourceNode = updatedNodes.find((n: any) => n.id === sId);
-              const targetNode = updatedNodes.find((n: any) => n.id === tId);
+            const nodeIds = new Set(updatedNodes.map((node: GraphNode) => node.id));
+            const updatedLinks = data.links.flatMap((link: GraphLink) => {
+              const sId = getEndpointId(link.source);
+              const tId = getEndpointId(link.target);
+              if (!sId || !tId || !nodeIds.has(sId) || !nodeIds.has(tId)) return [];
+
+              const sourceNode = updatedNodes.find((n: GraphNode) => n.id === sId);
+              const targetNode = updatedNodes.find((n: GraphNode) => n.id === tId);
               
               const lKey = `${sId}-${tId}`;
               const prevBirth = prevLinkBirthMap.get(lKey);
               const birthTime = prevBirth !== undefined ? prevBirth : Date.now();
 
-              return {
+              return [{
                 ...link,
                 source: sourceNode || sId,
                 target: targetNode || tId,
                 birthTime
-              };
+              }];
             });
 
             return { nodes: updatedNodes, links: updatedLinks };
           });
 
-          // 최초 로드 시에만 정중앙 정렬 수행하여 카메라 진동 렉 제거
-          if (isInitialLoad && fgRef.current) {
-            const cx = dimensions.width / 2;
-            const cy = dimensions.height / 2;
-            setTimeout(() => {
-              fgRef.current?.centerAt(cx, cy, 300);
-              fgRef.current?.zoomToFit(300, 60);
-            }, 100);
-          }
+          void isInitialLoad;
         } else if (data.type === 'graph_update') {
           // Fallback dummy node generator (ontology 데이터가 없을 때의 안전장치)
           const timestamp = Date.now();
@@ -570,10 +657,10 @@ export function SimulationRunner({ performAction }: Props) {
               return { nodes: animatedNewNodes, links: [] };
             }
             const newLinks = [
-              { source: (prev.nodes[Math.floor(Math.random() * prev.nodes.length)] as any)?.id || 'node_0', target: animatedNewNodes[0].id, birthTime: Date.now() },
+              { source: (prev.nodes[Math.floor(Math.random() * prev.nodes.length)])?.id || 'node_0', target: animatedNewNodes[0].id, birthTime: Date.now() },
               { source: animatedNewNodes[0].id, target: animatedNewNodes[1].id, birthTime: Date.now() },
               { source: animatedNewNodes[1].id, target: animatedNewNodes[2].id, birthTime: Date.now() },
-              { source: animatedNewNodes[2].id, target: (prev.nodes[Math.floor(Math.random() * prev.nodes.length)] as any)?.id || 'node_1', birthTime: Date.now() }
+              { source: animatedNewNodes[2].id, target: (prev.nodes[Math.floor(Math.random() * prev.nodes.length)])?.id || 'node_1', birthTime: Date.now() }
             ];
             return {
               nodes: [...prev.nodes, ...animatedNewNodes],
@@ -588,24 +675,27 @@ export function SimulationRunner({ performAction }: Props) {
       }
     };
 
-    return () => eventSource.close();
-  }, [performAction, dimensions]);
+    eventSource.onerror = () => {
+      eventSource.close();
+      setStreamError('시뮬레이션 연결이 끊어졌습니다. 저장된 결과를 확인하거나 새 실행을 시작해주세요.');
+    };
+
+    return () => {
+      eventSource.close();
+      pendingTimeouts.forEach(clearTimeout);
+    };
+    // 의도적으로 빈 배열: 스트림은 마운트 시 1회만 구독한다. 최신 dimensions는
+    // dimensionsRef로 읽으며, performAction은 이 effect 안에서 쓰이지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Node & Link interactive handlers ───────────────────────────────────
-  const handleNodeClick = (node: any) => {
+  const handleNodeClick = (node: GraphNode) => {
     setSelectedLinkId(null); // Clear link filter
     setSelectedNodeId(prev => prev === node.id ? null : node.id);
   };
 
-  const handleLinkClick = (link: any) => {
-    setSelectedNodeId(null); // Clear node filter
-    const sourceId = link.source.id || link.source;
-    const targetId = link.target.id || link.target;
-    const linkId = `${sourceId}-${targetId}`;
-    setSelectedLinkId(prev => prev === linkId ? null : linkId);
-  };
-
-  const nodeLabelHandler = (node: any) => {
+  const getNodeDetails = (node: GraphNode): NodeDetails => {
     let role = node.role;
     let persona = node.summary || node.persona;
     let goal = node.goal;
@@ -635,65 +725,12 @@ export function SimulationRunner({ performAction }: Props) {
     
     const name = node.label || node.id;
     
-    return `
-      <div style="
-        background: rgba(15, 23, 42, 0.95);
-        color: #f8fafc;
-        padding: 14px;
-        border-radius: 12px;
-        border: 1px solid #334155;
-        font-family: 'Inter', sans-serif;
-        font-size: 13px;
-        max-width: 280px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7);
-        backdrop-filter: blur(4px);
-        line-height: 1.5;
-      ">
-        <div style="font-weight: 800; font-size: 15px; color: #38bdf8; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-          <span>${name}</span>
-        </div>
-        <div style="font-size: 10px; color: #94a3b8; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em;">
-          ${role}
-        </div>
-        <div style="margin-bottom: 8px; font-size: 12px;">
-          <strong style="color: #3b82f6;">페르소나:</strong> 
-          <span style="color: #cbd5e1;">${persona}</span>
-        </div>
-        <div style="font-size: 12px;">
-          <strong style="color: #10b981;">검증 목표:</strong> 
-          <span style="color: #cbd5e1;">${goal}</span>
-        </div>
-      </div>
-    `;
-  };
-
-  const linkLabelHandler = (link: any) => {
-    const sourceName = link.source.label || link.source.id || link.source;
-    const targetName = link.target.label || link.target.id || link.target;
-    return `
-      <div style="
-        background: rgba(15, 23, 42, 0.95);
-        color: #cbd5e1;
-        padding: 10px 14px;
-        border-radius: 8px;
-        border: 1px solid #334155;
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        box-shadow: 0 8px 16px rgba(0,0,0,0.5);
-        backdrop-filter: blur(4px);
-      ">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <strong style="color: #38bdf8;">${sourceName}</strong>
-          <span style="color: #64748b;">── 연계/의존 ──></span>
-          <strong style="color: #f43f5e;">${targetName}</strong>
-        </div>
-      </div>
-    `;
+    return { name, role, persona, goal };
   };
 
   // ── Filtered Dialogue Feed ─────────────────────────────────────────────
   const getFilteredLogs = () => {
-    let result = logs.filter(log => {
+    const result = logs.filter(log => {
       if (log.type !== 'agent_post') return false;
       
       if (selectedNodeId) {
@@ -710,13 +747,13 @@ export function SimulationRunner({ performAction }: Props) {
                             
         const connectedNodeIds = graphData.links
           .filter(l => {
-            const sId = l.source.id || l.source;
-            const tId = l.target.id || l.target;
+            const sId = getEndpointId(l.source);
+            const tId = getEndpointId(l.target);
             return sId === selectedNodeId || tId === selectedNodeId;
           })
           .map(l => {
-            const sId = l.source.id || l.source;
-            const tId = l.target.id || l.target;
+            const sId = getEndpointId(l.source);
+            const tId = getEndpointId(l.target);
             return sId === selectedNodeId ? tId : sId;
           });
         
@@ -820,127 +857,22 @@ export function SimulationRunner({ performAction }: Props) {
   const filteredLogs = getFilteredLogs();
 
   return (
-    <div style={{ flex: 1, display: 'flex' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, width: '100%' }}>
+    <div style={{ flex: 1, display: 'flex', minHeight: 0, minWidth: 0 }}>
       {/* Network Graph Area */}
-      <div ref={containerRef} style={{ flex: 2, background: 'var(--bg-app)', position: 'relative' }}>
-        <ForceGraph2D
-          ref={fgRef}
-          width={dimensions.width}
-          height={dimensions.height}
-          graphData={graphData}
-          backgroundColor="var(--bg-app)"
-          d3AlphaDecay={0.05}
-          d3VelocityDecay={0.2}
-          nodeLabel={nodeLabelHandler}
-          linkLabel={linkLabelHandler}
+      <div ref={containerRef} style={{ flex: 2, minWidth: 0, background: 'var(--bg-app)', position: 'relative' }}>
+        <GraphErrorBoundary>
+        <SimulationNodeGraph
+          nodes={graphData.nodes}
+          links={graphData.links}
+          selectedNodeId={selectedNodeId}
+          hoveredNodeId={hoveredNodeId}
           onNodeClick={handleNodeClick}
-          onLinkClick={handleLinkClick}
-          onNodeHover={(node: any) => {
-            setHoveredNodeId(node ? node.id : null);
-          }}
-          onEngineStop={() => { console.log('Graph settled'); }}
-          linkColor={(link: any) => {
-            const age = Date.now() - (link.birthTime || (Date.now() - 10000));
-            const duration = 1200;
-            const t = Math.min(age / duration, 1);
-            const easeT = t * (2 - t); // quadratic ease-out
-            return `rgba(148, 163, 184, ${0.45 * easeT})`;
-          }}
-          linkWidth={(link: any) => {
-            const sourceId = link.source.id || link.source;
-            const targetId = link.target.id || link.target;
-            const linkId = `${sourceId}-${targetId}`;
-            const weight = getLinkWeight(link);
-            return selectedLinkId === linkId ? (sliderLinkWidth * weight * 1.5) : (sliderLinkWidth * weight);
-          }}
-          linkDirectionalParticles={1}
-          linkDirectionalParticleWidth={2}
-          linkDirectionalParticleSpeed={0.006}
-          linkDirectionalParticleColor={() => '#38bdf8'}
-          nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-            // NaN 좌표 1차 방어 처리
-            if (node.x === undefined || node.y === undefined || isNaN(node.x) || isNaN(node.y)) {
-              node.x = dimensions.width / 2 + (Math.random() - 0.5) * 50;
-              node.y = dimensions.height / 2 + (Math.random() - 0.5) * 50;
-            }
-
-            const label = node.label || node.id;
-            const labelFontSize = 10 / globalScale;
-            
-            // Transition 애니메이션 연산 (Age & Easing)
-            const age = Date.now() - (node.birthTime || (Date.now() - 10000));
-            const duration = 1200; // 1.2초 동안 부드럽게 등장
-            const t = Math.min(age / duration, 1);
-            const easeOutCubic = (x: number): number => 1 - Math.pow(1 - x, 3);
-            const easeT = easeOutCubic(t);
-
-            ctx.save();
-            ctx.globalAlpha = easeT; // 페이드인 효과 적용
-
-            // 연결 차수(degree)에 비례한 노드 반경 연산
-            const degree = getDegree(node.id);
-            const degreeScale = 1.0 + Math.min(degree * 0.12, 1.2);
-
-            // 1. 노드 원 그리기 (스케일 업 및 degree 기반 확대 반영)
-            const r = nodeSize * easeT * degreeScale;
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false);
-            
-            // 그룹별 채우기 색상 지정 (범례 색상 매칭)
-            const groupColors = [
-              '#3b82f6', // Group 0: 기획/개발
-              '#10b981', // Group 1: 보안/규제
-              '#eab308', // Group 2: 재무/SRE/QA
-              '#a855f7', // Group 3: 현업/생태계
-              '#ef4444', // Group 4: 도출된 리스크
-              '#f97316', // Group 5: 솔루션
-              '#64748b'  // Group 6: 마일스톤
-            ];
-            const color = groupColors[node.group % groupColors.length] || '#94a3b8';
-            ctx.fillStyle = color;
-            ctx.fill();
-            
-            // 2. 외곽선(테두리) 그리기 - 흰색 테두리
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            
-            // 선택된 노드일 경우 추가 강조 링 그리기
-            const isSelected = selectedNodeId === node.id;
-            const isHovered = hoveredNodeId === node.id;
-
-            if (isSelected) {
-              ctx.strokeStyle = '#38bdf8';
-              ctx.lineWidth = 2.5;
-              ctx.stroke();
-            }
-
-            // 3. 텍스트 라벨 그리기 (마우스를 올렸거나 클릭했을 때만 렌더링)
-            if (isSelected || isHovered) {
-              const textY = node.y + r + 4;
-              ctx.font = `bold ${labelFontSize}px sans-serif`;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'top';
-              
-              // 텍스트 시인성을 높이기 위한 반투명 뒷배경 박스
-              const textWidth = ctx.measureText(label).width;
-              ctx.fillStyle = 'rgba(2, 6, 23, 0.8)';
-              ctx.fillRect(node.x - textWidth / 2 - 2, textY - 1, textWidth + 4, labelFontSize + 2);
-              
-              ctx.fillStyle = '#f8fafc';
-              ctx.fillText(label, node.x, textY);
-            }
-
-            ctx.restore();
-          }}
-          nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
-            const r = nodeSize;
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, r + 2, 0, 2 * Math.PI, false);
-            ctx.fillStyle = color;
-            ctx.fill();
-          }}
+          onNodeHover={(node) => setHoveredNodeId(node ? node.id : null)}
+          nodeDetails={getNodeDetails}
+          nodeSize={nodeSize}
         />
+        </GraphErrorBoundary>
         
         {/* Visualization Controller Panel */}
         <Paper
@@ -1099,17 +1031,63 @@ export function SimulationRunner({ performAction }: Props) {
             <Text fw={800} size="sm" c="white">Simulation Network</Text>
             {simulationMode && (
               <Badge 
-                color={simulationMode === 'live' ? 'green' : simulationMode === 'live_fallback' ? 'red' : 'yellow'} 
+                color={simulationMode === 'live' || simulationMode === 'live_llm' ? 'green' : simulationMode === 'live_fallback' || simulationMode === 'live_error' ? 'red' : 'yellow'}
                 variant="light" 
                 size="xs"
               >
-                {simulationMode === 'live' ? 'MiroFish Live' : simulationMode === 'live_fallback' ? 'Live Failed' : 'Mock Mode'}
+                {simulationMode === 'live'
+                  ? 'MiroFish Live'
+                  : simulationMode === 'live_llm'
+                    ? 'Live LLM'
+                    : simulationMode === 'live_error'
+                      ? 'Live Failed'
+                      : simulationMode === 'live_fallback'
+                        ? 'Live Fallback'
+                        : 'Mock Mode'}
               </Badge>
             )}
           </Group>
           <Text size="xs" c="dimmed">Nodes: {graphData.nodes.length} | Links: {graphData.links.length}</Text>
+          {simulationMode && (
+            <Text size="xs" c={simulationMode === 'live' || simulationMode === 'live_llm' ? 'teal.3' : 'yellow.3'} mt={4}>
+              {simulationMode === 'live'
+                ? '실제 MiroFish 엔진 이벤트를 표시하고 있습니다.'
+                : simulationMode === 'live_llm'
+                  ? '구성된 LLM API가 현재 PRD와 Reality Seeds를 바탕으로 생성한 Live 시뮬레이션입니다.'
+                  : simulationMode === 'live_error'
+                    ? 'Live 호출이 실패했습니다. Mock 결과로 대체하지 않았습니다.'
+                    : '현재 PRD와 Reality Seeds를 입력으로 한 로컬 Mock 시뮬레이션입니다.'}
+            </Text>
+          )}
+          {simulationReason && <Text size="xs" c="orange.3" mt={4}>{simulationReason}</Text>}
+          {streamError && <Text size="xs" c="red.4" mt={4}>{streamError}</Text>}
         </Paper>
- 
+
+        {/* Bottom Log Panel Toggle */}
+        <Button
+          size="xs"
+          variant="subtle"
+          color={showBottomLog ? 'teal' : 'gray'}
+          onClick={() => setShowBottomLog(prev => !prev)}
+          leftSection={<span style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            backgroundColor: showBottomLog ? '#10b981' : '#94a3b8',
+            boxShadow: showBottomLog ? '0 0 8px #10b981' : 'none'
+          }} />}
+          style={{ position: 'absolute', top: 20, right: 20, zIndex: 10, pointerEvents: 'auto' }}
+          styles={{
+            root: {
+              background: 'rgba(9, 13, 22, 0.95)',
+              border: showBottomLog ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+              backdropFilter: 'blur(6px)',
+            }
+          }}
+        >
+          하단 로그 {showBottomLog ? 'ON' : 'OFF'}
+        </Button>
+
         <Box style={{ position: 'absolute', bottom: 20, left: 20, right: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pointerEvents: 'none' }}>
             <Box style={{ flex: 1, marginRight: '2rem', pointerEvents: 'auto' }}>
                 <Progress
@@ -1124,14 +1102,14 @@ export function SimulationRunner({ performAction }: Props) {
                 </Text>
             </Box>
  
-            {progress >= 100 && (
+            {isSimulationComplete && (
               <Button 
                 variant="gradient"
                 gradient={{ from: 'indigo', to: 'cyan' }}
-                onClick={() => performAction('stop_simulation')}
+                onClick={() => void performAction('simulation_complete')}
                 style={{ pointerEvents: 'auto', whiteSpace: 'nowrap' }}
               >
-                View Full Report →
+                View Simulation Report →
               </Button>
             )}
         </Box>
@@ -1178,10 +1156,18 @@ export function SimulationRunner({ performAction }: Props) {
                   }}
                 >
                   {log.type === 'agent_post' && (
-                    <Group gap="xs" mb={4}>
-                      <Text size="xs" fw={700} c="cyan.4">{log.agent_name}</Text>
-                      <Text size="10px" c="dimmed">({log.agent_type})</Text>
-                    </Group>
+                    <>
+                      <Group gap="xs" mb={4}>
+                        <Text size="xs" fw={700} c="cyan.4">{log.agent_name}</Text>
+                        <Text size="10px" c="dimmed">({log.agent_type})</Text>
+                        {log.round && <Badge size="xs" variant="light" color="violet">Round {log.round}</Badge>}
+                      </Group>
+                      {log.reply_to && (
+                        <Text size="10px" c="violet.3" mb={4}>
+                          ↳ {log.reply_to === 'topic' ? '시뮬레이션 주제' : log.reply_to}의 주장에 {log.stance === 'challenge' ? '반박' : log.stance === 'support' ? '지지' : '절충안 제시'}: {log.claim_reference || '이전 발언'}
+                        </Text>
+                      )}
+                    </>
                   )}
                   <Text size="xs" style={{ color: log.type === 'agent_post' ? '#cbd5e1' : '#64748b' }}>
                     {log.content || log.message}
@@ -1198,6 +1184,63 @@ export function SimulationRunner({ performAction }: Props) {
           </Stack>
         </ScrollArea>
       </Box>
+    </div>
+
+    {showBottomLog && (
+      <Box style={{
+        height: 220,
+        flexShrink: 0,
+        borderTop: '1px solid var(--border)',
+        background: 'var(--bg-panel)',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+        <Group justify="space-between" p="sm" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(9, 13, 22, 0.85)', flexShrink: 0 }}>
+          <Group gap="xs">
+            <Text fw={700} size="sm" c="white">Simulation Log</Text>
+            <Badge size="xs" variant="outline" color="teal">{logs.length} events</Badge>
+          </Group>
+          <Button
+            size="xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => setShowBottomLog(false)}
+            styles={{ root: { padding: '2px 6px', height: 'auto' } }}
+          >
+            숨기기
+          </Button>
+        </Group>
+        <ScrollArea style={{ flex: 1, padding: '8px 16px' }}>
+          <Stack gap={4}>
+            {logs.length === 0 ? (
+              <Text size="xs" c="dimmed" ta="center" mt="md">
+                아직 수신된 로그가 없습니다.
+              </Text>
+            ) : (
+              logs.map((log, i) => (
+                <Group key={i} gap="xs" wrap="nowrap" align="flex-start" style={{ fontFamily: 'monospace' }}>
+                  {log.timestamp && (
+                    <Text size="9px" c="dimmed" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </Text>
+                  )}
+                  <Badge size="xs" variant="light" color={log.type === 'agent_post' ? 'cyan' : log.type === 'simulation_complete' ? 'green' : 'gray'} style={{ flexShrink: 0 }}>
+                    {log.type}
+                  </Badge>
+                  {log.agent_name && (
+                    <Text size="10px" fw={700} c="cyan.4" style={{ flexShrink: 0 }}>{log.agent_name}</Text>
+                  )}
+                  <Text size="10px" c="dimmed" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {log.content || log.message || ''}
+                  </Text>
+                </Group>
+              ))
+            )}
+            <div ref={bottomLogEndRef} />
+          </Stack>
+        </ScrollArea>
+      </Box>
+    )}
     </div>
   );
 }

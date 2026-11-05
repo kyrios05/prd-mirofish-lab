@@ -610,9 +610,8 @@ class TestSchemaCheckEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestMiroFishClientSignature:
-    def test_run_validation_accepts_simulation_spec(self, minimal_prd_doc: PRDDocument):
+    async def test_run_validation_accepts_simulation_spec(self, minimal_prd_doc: PRDDocument):
         """MiroFishClient.run_validation must accept SimulationSpec and return ValidationResult (T06)."""
-        import asyncio
         from app.schemas import ValidationResult
         from app.services.mirofish_client import MiroFishClient
         spec = package_for_simulation(minimal_prd_doc)
@@ -620,9 +619,7 @@ class TestMiroFishClientSignature:
             base_url="https://example.com",
             api_key="test-key",
         )
-        result = asyncio.get_event_loop().run_until_complete(
-            client_instance.run_validation(spec)
-        )
+        result = await client_instance.run_validation(spec)
         # T06: mock engine now returns a ValidationResult (not None)
         assert result is not None
         assert isinstance(result, ValidationResult)

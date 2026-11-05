@@ -10,9 +10,10 @@ MiroFish API sequence
   POST /api/simulation/prepare       → { task_id, status: "preparing" }
   POST /api/simulation/prepare/status
        { task_id }                   → { status, progress }   ← poll until "ready"
-  POST /api/simulation/{id}/run      → { status }             (async start)
+  POST /api/simulation/start
+       { simulation_id, platform }   → { status }             (async start)
   GET  /api/simulation/{id}          → { status, ... }        ← poll until "completed"
-  GET  /api/simulation/{id}/report   → raw result dict
+  GET  /api/report/by-simulation/{id} → raw result dict
 
 Lifecycle states
 ----------------
@@ -448,7 +449,7 @@ class MiroFishAdapter:
         1. POST /api/simulation/create
         2. POST /api/simulation/prepare
         3. Poll POST /api/simulation/prepare/status until status == "ready"
-        4. POST /api/simulation/{simulation_id}/run
+        4. POST /api/simulation/start
         """
         job = MiroFishJob()
         logger.info("[job=%s] Starting submit_validation", job.job_id)

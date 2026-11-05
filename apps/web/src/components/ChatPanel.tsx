@@ -120,7 +120,7 @@ function shortTime(iso: string): string {
 
 function stripJsonBlocks(text: string): string {
   if (!text) return '';
-  let clean = text.replace(/```(?:json)?\s*[\s\S]*?```/g, '').trim();
+  const clean = text.replace(/```(?:json)?\s*[\s\S]*?```/g, '').trim();
 
   if (clean.startsWith('{') && clean.endsWith('}')) {
     try {
@@ -142,7 +142,7 @@ interface ChatPanelProps {
   chat: UseChatReturn;
   onRunValidation?: () => void;
   onSaveCheckpoint?: () => void;
-  onAction?: (actionId: string, payload?: any) => Promise<void>;
+  onAction?: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
 }
 
 export function ChatPanel({
@@ -164,18 +164,10 @@ export function ChatPanel({
     streamingStatus,
   } = chat;
 
-  const [localInput, setLocalInput] = useState('');
+  const [typedInput, setLocalInput] = useState('');
+  const localInput = pendingInput || typedInput;
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Sync pendingInput (from question chips) into local state
-  useEffect(() => {
-    if (pendingInput) {
-      setLocalInput(pendingInput);
-      setPendingInput('');
-      textareaRef.current?.focus();
-    }
-  }, [pendingInput, setPendingInput]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -186,6 +178,7 @@ export function ChatPanel({
     if (!localInput.trim() || isLoading) return;
     void sendMessage(localInput);
     setLocalInput('');
+    setPendingInput('');
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -275,10 +268,10 @@ export function ChatPanel({
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm, remarkBreaks]}
                           components={{
-                            a: ({ node, ...props }) => (
+                            a: ({ ...props }) => (
                               <a {...props} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8' }} />
                             ),
-                            code: ({ node, className, children, ...props }) => {
+                            code: ({ className, children, ...props }) => {
                               const match = /language-(\w+)/.exec(className || '');
                               const isInline = !match;
                               return isInline ? (
@@ -329,7 +322,7 @@ export function ChatPanel({
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkBreaks]}
                         components={{
-                          code: ({ node, className, children, ...props }) => {
+                          code: ({ className, children, ...props }) => {
                             const match = /language-(\w+)/.exec(className || '');
                             const isInline = !match;
                             return isInline ? (
@@ -415,7 +408,7 @@ export function ChatPanel({
             ref={textareaRef}
             placeholder="메시지를 입력하세요..."
             value={localInput}
-            onChange={(e) => setLocalInput(e.target.value)}
+            onChange={(e) => { setPendingInput(''); setLocalInput(e.target.value); }}
             onKeyDown={handleKeyDown}
             disabled={isLoading}
             style={{ flex: 1 }}

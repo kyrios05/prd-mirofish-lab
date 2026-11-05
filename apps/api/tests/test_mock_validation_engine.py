@@ -23,7 +23,6 @@ Scope guard: no actual HTTP calls, no LLM, no external I/O.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -531,28 +530,24 @@ class TestDeterminism:
 # ---------------------------------------------------------------------------
 
 class TestMiroFishClientIntegration:
-    def test_run_validation_returns_validation_result(self, minimal_spec: SimulationSpec):
+    async def test_run_validation_returns_validation_result(self, minimal_spec: SimulationSpec):
         """MiroFishClient.run_validation must now return ValidationResult, not None."""
         from app.services.mirofish_client import MiroFishClient
         client_instance = MiroFishClient(
             base_url="https://example.com",
             api_key="test-key",
         )
-        result = asyncio.get_event_loop().run_until_complete(
-            client_instance.run_validation(minimal_spec)
-        )
+        result = await client_instance.run_validation(minimal_spec)
         assert result is not None
         assert isinstance(result, ValidationResult)
 
-    def test_mirofish_client_result_has_summary(self, minimal_spec: SimulationSpec):
+    async def test_mirofish_client_result_has_summary(self, minimal_spec: SimulationSpec):
         from app.services.mirofish_client import MiroFishClient
         client_instance = MiroFishClient(
             base_url="https://example.com",
             api_key="test-key",
         )
-        result = asyncio.get_event_loop().run_until_complete(
-            client_instance.run_validation(minimal_spec)
-        )
+        result = await client_instance.run_validation(minimal_spec)
         assert isinstance(result.summary, str)
         assert len(result.summary) > 0
 

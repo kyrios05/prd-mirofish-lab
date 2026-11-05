@@ -341,21 +341,6 @@ class ConversationStateMachine:
                 completeness=completeness,
                 phase_history=phase_history,
             )
-            # After moving to REVIEWING, check if we can immediately move to READY_FOR_VALIDATION
-            if success:
-                self.auto_advance(completeness, phase_history)
-            return self.current_phase if success else None
-
-        if (
-            self.current_phase == ConversationPhase.REVIEWING
-            and completeness.progress >= 1.0
-        ):
-            success = self.transition(
-                ConversationPhase.READY_FOR_VALIDATION,
-                trigger="auto_advance_complete",
-                completeness=completeness,
-                phase_history=phase_history,
-            )
             return self.current_phase if success else None
 
         return None

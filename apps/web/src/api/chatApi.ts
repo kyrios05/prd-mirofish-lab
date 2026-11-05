@@ -68,7 +68,7 @@ export async function sendMessage(req: ChatRequest, signal?: AbortSignal): Promi
   return post<ChatResponse>('/chat/message', req, signal);
 }
 
-export async function performAction(sessionId: string, actionId: string, payload?: any, signal?: AbortSignal): Promise<ChatResponse> {
+export async function performAction(sessionId: string, actionId: string, payload?: Record<string, unknown>, signal?: AbortSignal): Promise<ChatResponse> {
   return post<ChatResponse>('/chat/action', {
     session_id: sessionId,
     action_id: actionId,
@@ -137,7 +137,7 @@ export async function listCheckpoints(
 export interface QuickStartResponse {
   status: string;
   phase: string;
-  prd: Record<string, any>;
+  prd: Record<string, unknown>;
 }
 
 export async function quickStartSimulation(

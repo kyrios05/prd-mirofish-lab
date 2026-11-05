@@ -1,11 +1,12 @@
+import type { UseChatReturn } from "../../hooks/useChat";
 import { SimulationSetup } from './SimulationSetup';
 import { SimulationRunner } from './SimulationRunner';
 import { ReportView } from './ReportView';
 import { Box, Group, Title, Button, Badge, Select } from '@mantine/core';
 
 interface SimulationContainerProps {
-  chat: any;
-  performAction: (actionId: string, payload?: Record<string, any>) => Promise<void>;
+  chat: UseChatReturn;
+  performAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
   liveMode: boolean;
   setLiveMode: (live: boolean) => void;
   theme: string;
@@ -13,7 +14,8 @@ interface SimulationContainerProps {
 }
 
 export function SimulationContainer({ chat, performAction, liveMode, setLiveMode, theme, setTheme }: SimulationContainerProps) {
-  const { phase } = chat;
+  const { phase, sessionId } = chat;
+  if (!sessionId) return null;
 
   return (
     <Box style={{ 
@@ -85,18 +87,24 @@ export function SimulationContainer({ chat, performAction, liveMode, setLiveMode
               }
             }}
           >
-            {liveMode ? "Live ON (Qwen)" : "Live OFF (Mock)"}
+            {liveMode ? "Live ON" : "Live OFF (Mock)"}
           </Button>
           <Badge size="lg" color="indigo" radius="sm" style={{ letterSpacing: '0.05em' }}>
             {phase.toUpperCase().replace('_', ' ')}
           </Badge>
         </Group>
       </Group>
-      <Box style={{ flex: 1, display: 'flex', width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
-        {phase === 'simulation_setup' && <SimulationSetup performAction={performAction} prd={chat.current_prd_draft} liveMode={liveMode} />}
-        {phase === 'simulating' && <SimulationRunner performAction={performAction} />}
+      <Box style={{ flex: 1, display: 'flex', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
+        {phase === 'simulation_setup' && (
+          <SimulationSetup
+            performAction={performAction}
+            liveMode={liveMode}
+            prd={chat.latestResponse?.structured_prd ?? null}
+          />
+        )}
+        {phase === 'simulating' && <SimulationRunner performAction={performAction} sessionId={sessionId} />}
         {(phase === 'simulation_result' || phase === 'report_generating' || phase === 'report_complete') && (
-          <ReportView performAction={performAction} phase={phase} />
+          <ReportView performAction={performAction} phase={phase} sessionId={sessionId} />
         )}
       </Box>
     </Box>

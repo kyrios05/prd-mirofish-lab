@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Container, Grid, Card, TextInput, Textarea, Button, Text, Group, Box, Center, ActionIcon, Title, Paper, Badge, Stack, Progress } from '@mantine/core';
 
 interface Stakeholder {
@@ -9,12 +9,12 @@ interface Stakeholder {
 }
 
 interface Props {
-  performAction: (actionId: string, payload?: any) => Promise<void>;
-  prd: any;
+  performAction: (actionId: string, payload?: Record<string, unknown>) => Promise<void>;
   liveMode?: boolean;
+  prd?: Record<string, unknown> | null;
 }
 
-export function SimulationSetup({ performAction, prd, liveMode }: Props) {
+export function SimulationSetup({ performAction, liveMode, prd }: Props) {
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
@@ -22,19 +22,14 @@ export function SimulationSetup({ performAction, prd, liveMode }: Props) {
 
   const [analyzeProgress, setAnalyzeProgress] = useState<number | null>(null);
   const [analyzeMsg, setAnalyzeMsg] = useState('');
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   const [startProgress, setStartProgress] = useState<number | null>(null);
   const [startMsg, setStartMsg] = useState('');
 
-  useEffect(() => {
-    if (prd?.validation?.stakeholder_personas && prd.validation.stakeholder_personas.length > 0) {
-      setStakeholders(prd.validation.stakeholder_personas);
-      setStep('config');
-    }
-  }, [prd]);
-
   const handleAnalyze = () => {
     setAnalyzing(true);
+    setAnalyzeError(null);
     setAnalyzeProgress(0);
     setAnalyzeMsg('🔍 PRD 요구사항 도메인 추출 분석 중...');
     
@@ -50,15 +45,18 @@ export function SimulationSetup({ performAction, prd, liveMode }: Props) {
           const response = await fetch('/api/simulation/propose-stakeholders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...(prd || {}), live: liveMode }),
+            body: JSON.stringify({ live: liveMode, prd }),
           });
           const data = await response.json();
           if (data.status === 'success') {
             setStakeholders(data.stakeholders);
             setStep('config');
+          } else {
+            setAnalyzeError(data.message || 'Reality Seeds 생성에 실패했습니다. Live 설정과 API 연결을 확인해주세요.');
           }
         } catch (error) {
           console.error('Failed to propose stakeholders:', error);
+          setAnalyzeError('Reality Seeds 요청에 실패했습니다. API 연결을 확인해주세요.');
         } finally {
           setAnalyzing(false);
         }
@@ -99,7 +97,7 @@ export function SimulationSetup({ performAction, prd, liveMode }: Props) {
     }, 100);
   };
 
-  const updateStakeholder = (index: number, field: keyof Stakeholder, value: any) => {
+  const updateStakeholder = (index: number, field: keyof Stakeholder, value: string | string[]) => {
     const updated = [...stakeholders];
     updated[index] = { ...updated[index], [field]: value };
     setStakeholders(updated);
@@ -164,6 +162,7 @@ export function SimulationSetup({ performAction, prd, liveMode }: Props) {
               </Text>
             </Box>
           )}
+          {analyzeError && <Text size="sm" c="red.4" mt="md">{analyzeError}</Text>}
         </Paper>
       </Center>
     );
@@ -189,7 +188,7 @@ export function SimulationSetup({ performAction, prd, liveMode }: Props) {
                 gradient={{ from: 'teal', to: 'lime' }}
                 onClick={handleStart} 
                 loading={loading && startProgress === null}
-                disabled={startProgress !== null}
+                disabled={startProgress !== null || stakeholders.length < 8}
               >
                 Start Simulation
               </Button>
