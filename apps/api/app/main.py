@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routes import chat, health, validation, simulation
+from app.routes import chat, health, validation, simulation, reality_seeds
 
 app = FastAPI(
     title=settings.app_name,
@@ -35,6 +35,7 @@ app.include_router(health.router)
 app.include_router(chat.router)
 app.include_router(validation.router)
 app.include_router(simulation.router)
+app.include_router(reality_seeds.router)
 
 
 @app.get("/", tags=["root"])

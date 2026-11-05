@@ -103,4 +103,8 @@ __all__ = [
     # --- Simulation spec models (T05) ---
     "SimulationSpec",
     "ValidationConfig",
+    "RealitySeedRequest",
+    "SeedPanel",
 ]
+
+from .reality_seeds import RealitySeedRequest, SeedPanel

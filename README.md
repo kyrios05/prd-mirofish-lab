@@ -43,3 +43,33 @@ Report failures stay in the generating phase with an explicit retry button.
 `GET /health` checks process liveness. `GET /ready` returns 503 when local
 storage, required LLM configuration, or the enabled MiroFish dependency is
 unavailable. Readiness checks do not perform billable LLM requests.
+
+
+### PRD Lab Nemotron Reality Seeds
+
+Reality Seeds offers an opt-in **Nemotron Korean users + expert reviewers**
+source in Live mode. This app owns `POST /simulation/reality-seeds/nemotron`
+(`session_id`, `prd`) and `GET /simulation/reality-seeds/{selection_id}?session_id=...`.
+It does not call or change MiroFish-Offline's `/api/persona-lab` endpoints.
+The existing PRD-only and Mock generation paths remain available.
+
+The dedicated service fetches 64 candidates from eight separated windows of
+NVIDIA's `nvidia/Nemotron-Personas-Korea` train split, then uses the configured
+OpenAI model (`gpt-6.1-terra`, high) to select/adapt eight relevant users/field
+workers and generate four expert reviewers. This is selection from a candidate
+sample, not an exhaustive search or a representative customer survey.
+
+Each saved selection retains original rows, the exact candidate snapshot/hash,
+observed Hub revision, UUID-to-member mapping, generated review hypotheses,
+license/attribution, and PRD fingerprint. The viewer API serves its current
+export, so the observed Hub revision is not a revision pin. Stored source
+snapshots are the reproducible evidence. Source metadata stays outside
+`PRD_SCHEMA.json` Stakeholder objects. Runs keep both the generated panel and
+the final manually edited members with their source references. A changed PRD
+requires generating a new selection. Failures return an error; there is no
+silent replacement with Mock or another project's personas.
+
+Dataset: https://huggingface.co/datasets/nvidia/Nemotron-Personas-Korea
+Attribution: NVIDIA Nemotron-Personas-Korea, CC BY 4.0. All source personas are
+synthetic; this dataset covers adults and does not establish actual customer
+preferences or product demand.

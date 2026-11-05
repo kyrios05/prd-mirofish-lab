@@ -64,6 +64,7 @@ from app.services.prd_generator import PRDGeneratorService
 from app.services.session_store import session_store
 from app.services.mirofish_service import MiroFishService
 from app.schemas.prd import PRDDocument
+from app.config import settings
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger("app.api.chat")
@@ -524,7 +525,6 @@ async def perform_action(body: ActionRequest) -> ChatResponse:
         state.current_phase = ConversationPhase.SIMULATION_SETUP.value
         assistant_message = "Entering MiroFish simulation setup."
     elif action_id == "start_simulation":
-        state.current_phase = ConversationPhase.SIMULATING.value
         assistant_message = "Simulation running..."
         
         # 1. Read live flag from payload (default to False if not provided, or fallback to config)
@@ -536,7 +536,29 @@ async def perform_action(body: ActionRequest) -> ChatResponse:
             
         # Update simulation.py session state mode
         from app.services.simulation_store import create_run, save_run
+        seed_selection_id = (body.payload or {}).get("seed_selection_id")
+        selection = None
+        if seed_selection_id:
+            from app.services import state_db
+            selection = state_db.load("reality-seed-selection", seed_selection_id)
+            if not selection or selection["session_id"] != state.session_id:
+                raise HTTPException(404, "Seed selection not found in this session")
+            from app.services.reality_seeds import fingerprint
+            if selection["prd_fingerprint"] != fingerprint(state.current_prd_draft or {}):
+                raise HTTPException(409, "PRD changed after seed selection; generate the seeds again")
+        if selection:
+            references = (body.payload or {}).get("stakeholder_seed_refs") or []
+            final_members = (body.payload or {}).get("stakeholder_personas") or []
+            allowed = {member["source_uuid"] for member in selection["adapted_members"]}
+            if len(references) != len(final_members) or any(uid not in allowed for uid in references):
+                raise HTTPException(422, "Invalid final seed source mapping")
+        state.current_phase = ConversationPhase.SIMULATING.value
         sim_session_state = create_run(state)
+        if selection:
+            sim_session_state["seed_final_members"] = [{"stakeholder": member, "source_uuid": uid} for member, uid in zip(final_members, references)]
+            sim_session_state["seed_selection_id"] = seed_selection_id
+            sim_session_state["seed_provenance"] = selection["provenance"]
+            sim_session_state["seed_adapted_members"] = selection["adapted_members"]
         sim_session_state["mode"] = "live" if is_live else "mock"
         sim_session_state["prd_snapshot"] = state.current_prd_draft or {}
         sim_session_state["simulation_events"] = []
